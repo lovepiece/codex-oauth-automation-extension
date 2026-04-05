@@ -172,6 +172,28 @@ header {
   color: #fff;
 }
 .btn-success:hover { opacity: 0.9; box-shadow: 0 2px 8px var(--green-soft); }
+
+.run-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.run-count-input {
+  width: 38px;
+  padding: 5px 4px;
+  text-align: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+.run-count-input:focus { border-color: var(--blue); }
+.run-count-input::-webkit-inner-spin-button { opacity: 0.5; }
 .btn-success:disabled { background: var(--bg-elevated); color: var(--text-muted); cursor: not-allowed; box-shadow: none; }
 
 .btn-ghost {

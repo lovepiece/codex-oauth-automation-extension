@@ -23,7 +23,7 @@ const DEFAULT_STATE = {
   tabRegistry: {},
   logs: [],
   vpsUrl: 'http://154.26.182.181:8317/management.html#/oauth',
-  mailProvider: 'qq', // 'qq' or '163'
+  mailProvider: '163', // 'qq' or '163'
 };
 
 async function getState() {
@@ -235,7 +235,8 @@ async function handleMessage(message, sender) {
     }
 
     case 'AUTO_RUN': {
-      autoRun();  // fire-and-forget, runs in background
+      const totalRuns = message.payload?.totalRuns || 1;
+      autoRunLoop(totalRuns);  // fire-and-forget
       return { ok: true };
     }
 
@@ -388,65 +389,101 @@ async function executeStepAndWait(step, delayAfter = 2000) {
 // ============================================================
 
 let autoRunActive = false;
+let autoRunCurrentRun = 0;
+let autoRunTotalRuns = 1;
 
-async function autoRun() {
+// Outer loop: runs the full flow N times
+async function autoRunLoop(totalRuns) {
   if (autoRunActive) {
     await addLog('Auto run already in progress', 'warn');
     return;
   }
 
   autoRunActive = true;
+  autoRunTotalRuns = totalRuns;
   await setState({ autoRunning: true });
-  chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'running' } }).catch(() => {});
 
-  try {
-    // Phase 1: Steps 1-2 (get OAuth link, open signup)
-    await addLog('=== Auto Run Phase 1: Get OAuth link & open signup ===', 'info');
-    await executeStepAndWait(1, 2000);
-    await executeStepAndWait(2, 2000);
+  for (let run = 1; run <= totalRuns; run++) {
+    autoRunCurrentRun = run;
 
-    // Pause: ask user to generate DuckDuckGo email
-    await addLog('=== Auto Run PAUSED: Please paste DuckDuckGo email and click "Continue Auto" ===', 'warn');
-    chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'waiting_email' } }).catch(() => {});
+    if (run > 1) {
+      // Reset state for next run (keep vpsUrl, mailProvider settings)
+      await addLog(`=== Resetting for run ${run}/${totalRuns} ===`, 'info');
+      const state = await getState();
+      const keepSettings = { vpsUrl: state.vpsUrl, mailProvider: state.mailProvider };
+      await resetState();
+      await setState(keepSettings);
+      // Broadcast reset to side panel
+      chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => {});
+      await new Promise(r => setTimeout(r, 1000));
+    }
 
-    // Wait here — resumed by RESUME_AUTO_RUN message from side panel
+    await addLog(`=== Auto Run ${run}/${totalRuns} — Phase 1: Get OAuth link & open signup ===`, 'info');
+    const status = (phase) => ({ type: 'AUTO_RUN_STATUS', payload: { phase, currentRun: run, totalRuns } });
 
-  } catch (err) {
-    await addLog(`Auto run failed at Phase 1: ${err.message}`, 'error');
-    autoRunActive = false;
-    await setState({ autoRunning: false });
-    chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'stopped' } }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage(status('running')).catch(() => {});
+
+      await executeStepAndWait(1, 2000);
+      await executeStepAndWait(2, 2000);
+
+      // Pause for email
+      await addLog(`=== Run ${run}/${totalRuns} PAUSED: Paste DuckDuckGo email, click Continue ===`, 'warn');
+      chrome.runtime.sendMessage(status('waiting_email')).catch(() => {});
+
+      // Wait for RESUME_AUTO_RUN — sets a promise that resumeAutoRun resolves
+      await waitForResume();
+
+      const state = await getState();
+      if (!state.email) {
+        await addLog('Cannot resume: no email address.', 'error');
+        break;
+      }
+
+      await addLog(`=== Run ${run}/${totalRuns} — Phase 2: Register, verify, login, complete ===`, 'info');
+      chrome.runtime.sendMessage(status('running')).catch(() => {});
+
+      await executeStepAndWait(3, 3000);
+      await executeStepAndWait(4, 2000);
+      await executeStepAndWait(5, 3000);
+      await executeStepAndWait(6, 3000);
+      await executeStepAndWait(7, 2000);
+      await executeStepAndWait(8, 2000);
+      await executeStepAndWait(9, 1000);
+
+      await addLog(`=== Run ${run}/${totalRuns} COMPLETE! ===`, 'ok');
+
+    } catch (err) {
+      await addLog(`Run ${run}/${totalRuns} failed: ${err.message}`, 'error');
+      chrome.runtime.sendMessage(status('stopped')).catch(() => {});
+      break; // Stop on error
+    }
   }
+
+  await addLog(`=== All ${autoRunTotalRuns} runs finished ===`, 'ok');
+  chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'complete', currentRun: autoRunCurrentRun, totalRuns: autoRunTotalRuns } }).catch(() => {});
+  autoRunActive = false;
+  await setState({ autoRunning: false });
+}
+
+// Promise-based pause/resume mechanism
+let resumeResolver = null;
+
+function waitForResume() {
+  return new Promise((resolve) => {
+    resumeResolver = resolve;
+  });
 }
 
 async function resumeAutoRun() {
-  try {
-    const state = await getState();
-    if (!state.email) {
-      await addLog('Cannot resume: no email address. Paste email in Side Panel first.', 'error');
-      return;
-    }
-
-    // Phase 2: Steps 3-9 (fill form, get codes, login, OAuth, verify)
-    await addLog('=== Auto Run Phase 2: Register, verify, login, complete OAuth ===', 'info');
-
-    await executeStepAndWait(3, 3000);  // Fill email/password → page navigates to code input
-    await executeStepAndWait(4, 2000);  // Get signup code from QQ Mail → fill in
-    await executeStepAndWait(5, 3000);  // Fill name/birthday → page navigates to add-phone
-    await executeStepAndWait(6, 3000);  // Login via OAuth URL → fill email/password
-    await executeStepAndWait(7, 2000);  // Get login code from QQ Mail → fill in
-    await executeStepAndWait(8, 2000);  // Click "继续" → localhost redirect captured
-    await executeStepAndWait(9, 1000);  // VPS verify → wait for "认证成功！"
-
-    await addLog('=== Auto Run COMPLETE! All 9 steps finished successfully ===', 'ok');
-    chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'complete' } }).catch(() => {});
-
-  } catch (err) {
-    await addLog(`Auto run failed: ${err.message}`, 'error');
-    chrome.runtime.sendMessage({ type: 'AUTO_RUN_STATUS', payload: { phase: 'stopped' } }).catch(() => {});
-  } finally {
-    autoRunActive = false;
-    await setState({ autoRunning: false });
+  const state = await getState();
+  if (!state.email) {
+    await addLog('Cannot resume: no email address. Paste email in Side Panel first.', 'error');
+    return;
+  }
+  if (resumeResolver) {
+    resumeResolver();
+    resumeResolver = null;
   }
 }
 

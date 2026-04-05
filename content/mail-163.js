@@ -16,8 +16,14 @@ const isTopFrame = window === window.top;
 
 console.log(MAIL163_PREFIX, 'Content script loaded on', location.href, 'frame:', isTopFrame ? 'top' : 'child');
 
+// Only operate in the top frame — child iframes don't have the inbox
+if (!isTopFrame) {
+  console.log(MAIL163_PREFIX, 'Skipping child frame');
+  // Don't report ready or handle messages from child frames
+} else {
+
 // ============================================================
-// Message Handler
+// Message Handler (top frame only)
 // ============================================================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -75,25 +81,34 @@ async function handlePollEmail(step, payload) {
 
   log(`Step ${step}: Starting email poll on 163 Mail (max ${maxAttempts} attempts)`);
 
-  // First, click on "收件箱" in left sidebar to ensure we're in inbox view
-  await sleep(2000);
-  const inboxLink = document.querySelector('.nui-tree-item-text[title="收件箱"]');
-  if (inboxLink) {
+  // Wait for sidebar to load, then click "收件箱"
+  log(`Step ${step}: Waiting for 163 Mail sidebar to load...`);
+  try {
+    const inboxLink = await waitForElement('.nui-tree-item-text[title="收件箱"]', 5000);
     inboxLink.click();
     log(`Step ${step}: Clicked inbox in sidebar`);
-    await sleep(2000);
+  } catch {
+    log(`Step ${step}: Could not find inbox link, trying to proceed anyway...`, 'warn');
   }
 
-  // Wait for mail list to load
-  let items = findMailItems();
+  // Wait for mail list — poll every 500ms, max 10s
+  log(`Step ${step}: Waiting for mail list...`);
+  let items = [];
+  for (let i = 0; i < 20; i++) {
+    items = findMailItems();
+    if (items.length > 0) break;
+    await sleep(500);
+  }
+
   if (items.length === 0) {
-    log(`Step ${step}: Waiting for mail list to appear...`);
-    await sleep(5000);
+    log(`Step ${step}: Mail list not found, trying refresh...`, 'warn');
+    await refreshInbox();
+    await sleep(2000);
     items = findMailItems();
   }
 
   if (items.length === 0) {
-    throw new Error('163 Mail list did not load. Make sure inbox is open.');
+    throw new Error('163 Mail list did not load. Make sure inbox is open and has emails.');
   }
 
   log(`Step ${step}: Mail list loaded, ${items.length} items found`);
@@ -206,3 +221,5 @@ function extractVerificationCode(text) {
 
   return null;
 }
+
+} // end of isTopFrame else block

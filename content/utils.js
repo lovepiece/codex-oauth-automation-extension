@@ -224,4 +224,8 @@ function sleep(ms) {
 }
 
 // Auto-report ready on load
-reportReady();
+// Skip ready signal from child iframes of mail pages to avoid overwriting the top frame's registration
+const _isMailChildFrame = (SCRIPT_SOURCE === 'qq-mail' || SCRIPT_SOURCE === 'mail-163') && window !== window.top;
+if (!_isMailChildFrame) {
+  reportReady();
+}

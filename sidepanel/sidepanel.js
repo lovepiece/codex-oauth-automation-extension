@@ -21,6 +21,7 @@ const autoContinueBar = document.getElementById('auto-continue-bar');
 const btnClearLog = document.getElementById('btn-clear-log');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const selectMailProvider = document.getElementById('select-mail-provider');
+const inputRunCount = document.getElementById('input-run-count');
 
 // ============================================================
 // State Restore on load
@@ -204,9 +205,11 @@ document.querySelectorAll('.step-btn').forEach(btn => {
 
 // Auto Run
 btnAutoRun.addEventListener('click', async () => {
+  const totalRuns = parseInt(inputRunCount.value) || 1;
   btnAutoRun.disabled = true;
+  inputRunCount.disabled = true;
   btnAutoRun.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Running...';
-  await chrome.runtime.sendMessage({ type: 'AUTO_RUN', source: 'sidepanel' });
+  await chrome.runtime.sendMessage({ type: 'AUTO_RUN', source: 'sidepanel', payload: { totalRuns } });
 });
 
 btnAutoContinue.addEventListener('click', async () => {
@@ -297,6 +300,21 @@ chrome.runtime.onMessage.addListener((message) => {
       break;
     }
 
+    case 'AUTO_RUN_RESET': {
+      // Reset UI for next run (but keep buttons disabled since auto-run is still going)
+      displayOauthUrl.textContent = 'Waiting...';
+      displayOauthUrl.classList.remove('has-value');
+      displayLocalhostUrl.textContent = 'Waiting...';
+      displayLocalhostUrl.classList.remove('has-value');
+      inputEmail.value = '';
+      displayStatus.textContent = 'Ready';
+      statusBar.className = 'status-bar';
+      document.querySelectorAll('.step-row').forEach(row => row.className = 'step-row');
+      document.querySelectorAll('.step-status').forEach(el => el.textContent = '');
+      updateProgressCounter();
+      break;
+    }
+
     case 'DATA_UPDATED': {
       if (message.payload.oauthUrl) {
         displayOauthUrl.textContent = message.payload.oauthUrl;
@@ -310,19 +328,25 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 
     case 'AUTO_RUN_STATUS': {
-      const { phase } = message.payload;
+      const { phase, currentRun, totalRuns } = message.payload;
+      const runLabel = totalRuns > 1 ? ` (${currentRun}/${totalRuns})` : '';
       switch (phase) {
         case 'waiting_email':
           autoContinueBar.style.display = 'flex';
-          btnAutoRun.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Paused';
+          btnAutoRun.innerHTML = `Paused${runLabel}`;
+          break;
+        case 'running':
+          btnAutoRun.innerHTML = `Running${runLabel}`;
           break;
         case 'complete':
           btnAutoRun.disabled = false;
+          inputRunCount.disabled = false;
           btnAutoRun.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Auto';
           autoContinueBar.style.display = 'none';
           break;
         case 'stopped':
           btnAutoRun.disabled = false;
+          inputRunCount.disabled = false;
           btnAutoRun.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Auto';
           autoContinueBar.style.display = 'none';
           break;
