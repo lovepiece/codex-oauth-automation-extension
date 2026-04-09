@@ -548,6 +548,46 @@ async function sendToContentScriptResilient(source, message, options = {}) {
   throw lastError || new Error(`等待 ${getSourceLabel(source)} 重新就绪超时。`);
 }
 
+async function sendToMailContentScriptResilient(mail, message, options = {}) {
+  const { timeoutMs = 45000, maxRecoveryAttempts = 2 } = options;
+  const start = Date.now();
+  let lastError = null;
+  let recoveries = 0;
+  let logged = false;
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+
+    try {
+      return await sendToContentScript(mail.source, message);
+    } catch (err) {
+      if (!isRetryableContentScriptTransportError(err)) {
+        throw err;
+      }
+
+      lastError = err;
+      if (!logged) {
+        await addLog(`步骤 ${message.step}：${mail.label} 页面通信异常，正在尝试让邮箱页重新就绪...`, 'warn');
+        logged = true;
+      }
+
+      if (recoveries >= maxRecoveryAttempts) {
+        break;
+      }
+
+      recoveries += 1;
+      await reuseOrCreateTab(mail.source, mail.url, {
+        inject: mail.inject,
+        injectSource: mail.injectSource,
+        reloadIfSameUrl: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  }
+
+  throw lastError || new Error(`${mail.label} 页面未能重新就绪。`);
+}
+
 // ============================================================
 // Logging
 // ============================================================
@@ -1718,12 +1758,19 @@ async function pollFreshVerificationCode(step, state, mail, pollOverrides = {}) 
     });
 
     try {
-      const result = await sendToContentScript(mail.source, {
-        type: 'POLL_EMAIL',
-        step,
-        source: 'background',
-        payload,
-      });
+      const result = await sendToMailContentScriptResilient(
+        mail,
+        {
+          type: 'POLL_EMAIL',
+          step,
+          source: 'background',
+          payload,
+        },
+        {
+          timeoutMs: 45000,
+          maxRecoveryAttempts: 2,
+        }
+      );
 
       if (result && result.error) {
         throw new Error(result.error);
