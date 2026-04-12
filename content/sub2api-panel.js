@@ -42,8 +42,8 @@ function getSub2ApiOrigin(payload = {}) {
   }
 }
 
-function normalizeRedirectUri(rawUrl) {
-  const input = (rawUrl || '').trim() || SUB2API_DEFAULT_REDIRECT_URI;
+function normalizeRedirectUri() {
+  const input = SUB2API_DEFAULT_REDIRECT_URI;
   const withProtocol = /^https?:\/\//i.test(input) ? input : `http://${input}`;
   const parsed = new URL(withProtocol);
   if (!parsed.pathname || parsed.pathname === '/') {
@@ -288,7 +288,7 @@ function openAccountsPageSoon(origin) {
 }
 
 async function step1_generateOpenAiAuthUrl(payload = {}) {
-  const redirectUri = normalizeRedirectUri(payload.sub2apiRedirectUri);
+  const redirectUri = normalizeRedirectUri();
   const groupName = (payload.sub2apiGroupName || SUB2API_DEFAULT_GROUP_NAME).trim() || SUB2API_DEFAULT_GROUP_NAME;
 
   const { origin, token } = await loginSub2Api(payload);

@@ -169,7 +169,7 @@ function isLocalhostOAuthCallbackUrl(rawUrl) {
   if (!parsed) return false;
   if (!['http:', 'https:'].includes(parsed.protocol)) return false;
   if (!['localhost', '127.0.0.1'].includes(parsed.hostname)) return false;
-  if (parsed.pathname !== '/auth/callback') return false;
+  if (!['/auth/callback', '/codex/callback'].includes(parsed.pathname)) return false;
 
   const code = (parsed.searchParams.get('code') || '').trim();
   const state = (parsed.searchParams.get('state') || '').trim();

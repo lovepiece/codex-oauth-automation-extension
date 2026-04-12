@@ -41,8 +41,6 @@ const rowSub2ApiPassword = document.getElementById('row-sub2api-password');
 const inputSub2ApiPassword = document.getElementById('input-sub2api-password');
 const rowSub2ApiGroup = document.getElementById('row-sub2api-group');
 const inputSub2ApiGroup = document.getElementById('input-sub2api-group');
-const rowSub2ApiRedirectUri = document.getElementById('row-sub2api-redirect-uri');
-const inputSub2ApiRedirectUri = document.getElementById('input-sub2api-redirect-uri');
 const selectMailProvider = document.getElementById('select-mail-provider');
 const rowInbucketHost = document.getElementById('row-inbucket-host');
 const inputInbucketHost = document.getElementById('input-inbucket-host');
@@ -296,7 +294,6 @@ function collectSettingsPayload() {
     sub2apiEmail: inputSub2ApiEmail.value.trim(),
     sub2apiPassword: inputSub2ApiPassword.value,
     sub2apiGroupName: inputSub2ApiGroup.value.trim(),
-    sub2apiRedirectUri: inputSub2ApiRedirectUri.value.trim(),
     customPassword: inputPassword.value,
     mailProvider: selectMailProvider.value,
     inbucketHost: inputInbucketHost.value.trim(),
@@ -476,9 +473,6 @@ async function restoreState() {
     if (state.sub2apiGroupName) {
       inputSub2ApiGroup.value = state.sub2apiGroupName;
     }
-    if (state.sub2apiRedirectUri) {
-      inputSub2ApiRedirectUri.value = state.sub2apiRedirectUri;
-    }
     if (state.mailProvider) {
       selectMailProvider.value = state.mailProvider;
     }
@@ -532,7 +526,6 @@ function updatePanelModeUI() {
   rowSub2ApiEmail.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiPassword.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiGroup.style.display = useSub2Api ? '' : 'none';
-  rowSub2ApiRedirectUri.style.display = useSub2Api ? '' : 'none';
 
   const step9Btn = document.querySelector('.step-btn[data-step="9"]');
   if (step9Btn) {
@@ -1042,14 +1035,6 @@ inputSub2ApiGroup.addEventListener('input', () => {
   scheduleSettingsAutoSave();
 });
 inputSub2ApiGroup.addEventListener('blur', () => {
-  saveSettings({ silent: true }).catch(() => { });
-});
-
-inputSub2ApiRedirectUri.addEventListener('input', () => {
-  markSettingsDirty(true);
-  scheduleSettingsAutoSave();
-});
-inputSub2ApiRedirectUri.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
