@@ -614,7 +614,7 @@ function collectSettingsPayload() {
     inbucketMailbox: inputInbucketMailbox.value.trim(),
     cloudflareDomain: selectedCloudflareDomain,
     cloudflareDomains: domains,
-    autoRunSkipFailures: inputAutoSkipFailures.checked,
+    autoRunSkipFailures: true,
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
   };
@@ -757,7 +757,7 @@ function applyAutoRunStatus(payload = currentAutoRun) {
   btnAutoRun.disabled = currentAutoRun.autoRunning;
   btnFetchEmail.disabled = locked;
   inputEmail.disabled = locked;
-  inputAutoSkipFailures.disabled = scheduled;
+  inputAutoSkipFailures.disabled = true;
 
   if (currentAutoRun.totalRuns > 0) {
     inputRunCount.value = String(currentAutoRun.totalRuns);
@@ -855,7 +855,7 @@ function applySettingsState(state) {
   inputInbucketMailbox.value = state?.inbucketMailbox || '';
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
-  inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
+  inputAutoSkipFailures.checked = true;
   inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
   inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state?.autoRunDelayMinutes));
   if (state?.autoRunTotalRuns) {
@@ -2113,7 +2113,7 @@ btnAutoRun.addEventListener('click', async () => {
       payload: {
         totalRuns,
         delayMinutes,
-        autoRunSkipFailures: inputAutoSkipFailures.checked,
+        autoRunSkipFailures: true,
         mode,
       },
     });

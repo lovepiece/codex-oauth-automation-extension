@@ -39,6 +39,8 @@ const DEFAULT_SUB2API_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 const AUTO_RUN_ALARM_NAME = 'scheduled-auto-run';
 const AUTO_RUN_DELAY_MIN_MINUTES = 1;
 const AUTO_RUN_DELAY_MAX_MINUTES = 1440;
+const AUTO_RUN_RETRY_DELAY_MS = 3000;
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 3;
 const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 
 initializeSessionStorageAccess();
@@ -57,7 +59,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   sub2apiPassword: '', // SUB2API 登录密码。
   sub2apiGroupName: DEFAULT_SUB2API_GROUP_NAME, // SUB2API 创建账号时绑定的分组名。
   customPassword: '', // 自定义账号密码；留空时由程序自动生成随机密码。
-  autoRunSkipFailures: false, // 自动运行遇到失败步骤后，是否继续执行后续流程。
+  autoRunSkipFailures: true, // 保留旧字段兼容；自动运行遇错时默认重试当前轮。
   autoRunDelayEnabled: false, // 自动运行是否启用启动前倒计时。
   autoRunDelayMinutes: 30, // 自动运行倒计时分钟数。
   mailProvider: '163', // 验证码邮箱来源（163 / 163-vip / qq / inbucket）。
@@ -67,6 +69,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareDomain: '', // 仅当 emailGenerator=cloudflare 时填写自定义域名。
   cloudflareDomains: [], // Cloudflare 可选域名列表。
   hotmailAccounts: [],
+  autoRunDelayEnabled: false,
 };
 
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
@@ -3302,7 +3305,81 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
   }
 }
 
-// Outer loop: keep retrying until the target number of successful runs is reached.
+function createAutoRunRoundSummary(round) {
+  return {
+    round,
+    status: 'pending',
+    attempts: 0,
+    failureReasons: [],
+    finalFailureReason: '',
+  };
+}
+
+function getAutoRunRoundRetryCount(summary) {
+  return Math.max(0, Number(summary?.attempts || 0) - 1);
+}
+
+function formatAutoRunFailureReasons(reasons = []) {
+  if (!Array.isArray(reasons) || !reasons.length) {
+    return '未知错误';
+  }
+
+  const counts = new Map();
+  for (const reason of reasons) {
+    const normalized = String(reason || '').trim() || '未知错误';
+    counts.set(normalized, (counts.get(normalized) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([reason, count]) => (count > 1 ? `${reason}（${count}次）` : reason))
+    .join('；');
+}
+
+async function logAutoRunFinalSummary(totalRuns, roundSummaries = []) {
+  const summaries = Array.from({ length: totalRuns }, (_, index) => {
+    return roundSummaries[index] || createAutoRunRoundSummary(index + 1);
+  });
+  const successRounds = summaries.filter((item) => item.status === 'success');
+  const failedRounds = summaries.filter((item) => item.status === 'failed');
+  const pendingRounds = summaries.filter((item) => item.status === 'pending');
+
+  await addLog('=== 自动运行汇总 ===', failedRounds.length ? 'warn' : 'ok');
+  await addLog(
+    `总轮数：${totalRuns}；成功：${successRounds.length}；失败：${failedRounds.length}；未完成：${pendingRounds.length}`,
+    failedRounds.length ? 'warn' : 'ok'
+  );
+
+  if (successRounds.length) {
+    await addLog(
+      `成功轮次：${successRounds
+        .map((item) => `第 ${item.round} 轮（重试 ${getAutoRunRoundRetryCount(item)} 次）`)
+        .join('；')}`,
+      'ok'
+    );
+  }
+
+  if (failedRounds.length) {
+    await addLog(
+      `失败轮次：${failedRounds
+        .map((item) => {
+          const retryCount = getAutoRunRoundRetryCount(item);
+          const finalReason = item.finalFailureReason || item.failureReasons[item.failureReasons.length - 1] || '未知错误';
+          const reasonSummary = formatAutoRunFailureReasons(item.failureReasons);
+          return `第 ${item.round} 轮（重试 ${retryCount} 次，最终原因：${finalReason}；失败记录：${reasonSummary}）`;
+        })
+        .join('；')}`,
+      'error'
+    );
+  }
+
+  if (pendingRounds.length) {
+    await addLog(
+      `未完成轮次：${pendingRounds.map((item) => `第 ${item.round} 轮`).join('；')}`,
+      'warn'
+    );
+  }
+}
+
 async function autoRunLoop(totalRuns, options = {}) {
   if (autoRunActive) {
     await addLog('自动运行已在进行中', 'warn');
@@ -3314,17 +3391,19 @@ async function autoRunLoop(totalRuns, options = {}) {
   autoRunTotalRuns = totalRuns;
   autoRunCurrentRun = 0;
   autoRunAttemptRun = 0;
-  const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
+  const autoRunSkipFailures = true;
   const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
-  const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) ? options.resumeCurrentRun : 0;
-  const resumeSuccessfulRuns = Number.isInteger(options.resumeSuccessfulRuns) ? options.resumeSuccessfulRuns : 0;
-  const resumeAttemptRunsProcessed = Number.isInteger(options.resumeAttemptRunsProcessed) ? options.resumeAttemptRunsProcessed : 0;
-  let maxAttempts = autoRunSkipFailures ? Math.max(totalRuns * 10, totalRuns + 20) : totalRuns;
-  const forcedRetryCap = Math.max(totalRuns * 10, totalRuns + 20);
-  let successfulRuns = Math.max(0, resumeSuccessfulRuns);
-  let attemptRuns = Math.max(0, resumeAttemptRunsProcessed);
+  const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
+    ? Math.min(totalRuns, options.resumeCurrentRun)
+    : 1;
+  const resumeAttemptRun = Number.isInteger(options.resumeAttemptRun) && options.resumeAttemptRun > 0
+    ? Math.min(AUTO_RUN_MAX_RETRIES_PER_ROUND + 1, options.resumeAttemptRun)
+    : 1;
+  let successfulRuns = 0;
   let forceFreshTabsNextRun = false;
   let continueCurrentOnFirstAttempt = initialMode === 'continue';
+  let stoppedEarly = false;
+  const roundSummaries = Array.from({ length: totalRuns }, (_, index) => createAutoRunRoundSummary(index + 1));
   const initialState = await getState();
   const initialPhase = continueCurrentOnFirstAttempt && getRunningSteps(initialState.stepStatuses).length
     ? 'waiting_step'
@@ -3333,180 +3412,180 @@ async function autoRunLoop(totalRuns, options = {}) {
   await setState({
     autoRunSkipFailures,
     ...getAutoRunStatusPayload(initialPhase, {
-      currentRun: resumeCurrentRun,
+      currentRun: continueCurrentOnFirstAttempt ? resumeCurrentRun : 0,
       totalRuns,
-      attemptRun: resumeAttemptRunsProcessed,
+      attemptRun: continueCurrentOnFirstAttempt ? resumeAttemptRun : 0,
     }),
   });
 
-  while (successfulRuns < totalRuns && attemptRuns < maxAttempts) {
-    attemptRuns += 1;
-    const targetRun = successfulRuns + 1;
-    autoRunCurrentRun = targetRun;
-    autoRunAttemptRun = attemptRuns;
-    let startStep = 1;
-    let useExistingProgress = false;
+  for (let targetRun = resumeCurrentRun; targetRun <= totalRuns; targetRun++) {
+    const roundSummary = roundSummaries[targetRun - 1];
+    let attemptRun = continueCurrentOnFirstAttempt && targetRun === resumeCurrentRun ? resumeAttemptRun : 1;
+    let reuseExistingProgress = continueCurrentOnFirstAttempt && targetRun === resumeCurrentRun;
 
-    if (continueCurrentOnFirstAttempt) {
-      let currentState = await getState();
-      if (getRunningSteps(currentState.stepStatuses).length) {
-        currentState = await waitForRunningStepsToFinish({
-          currentRun: targetRun,
-          totalRuns,
-          attemptRun: attemptRuns,
+    while (attemptRun <= AUTO_RUN_MAX_RETRIES_PER_ROUND + 1) {
+      autoRunCurrentRun = targetRun;
+      autoRunAttemptRun = attemptRun;
+      roundSummary.attempts = attemptRun;
+      let startStep = 1;
+      let useExistingProgress = false;
+
+      if (reuseExistingProgress) {
+        let currentState = await getState();
+        if (getRunningSteps(currentState.stepStatuses).length) {
+          currentState = await waitForRunningStepsToFinish({
+            currentRun: targetRun,
+            totalRuns,
+            attemptRun,
+          });
+        }
+        const resumeStep = getFirstUnfinishedStep(currentState.stepStatuses);
+        if (resumeStep && hasSavedProgress(currentState.stepStatuses)) {
+          startStep = resumeStep;
+          useExistingProgress = true;
+        } else if (hasSavedProgress(currentState.stepStatuses)) {
+          await addLog('检测到当前流程已处理完成，本轮将改为从步骤 1 重新开始。', 'info');
+        }
+      }
+
+      if (!useExistingProgress) {
+        const prevState = await getState();
+        const keepSettings = {
+          vpsUrl: prevState.vpsUrl,
+          vpsPassword: prevState.vpsPassword,
+          customPassword: prevState.customPassword,
+          autoRunSkipFailures: prevState.autoRunSkipFailures,
+          autoRunDelayEnabled: prevState.autoRunDelayEnabled,
+          autoRunDelayMinutes: prevState.autoRunDelayMinutes,
+          mailProvider: prevState.mailProvider,
+          emailGenerator: prevState.emailGenerator,
+          inbucketHost: prevState.inbucketHost,
+          inbucketMailbox: prevState.inbucketMailbox,
+          cloudflareDomain: prevState.cloudflareDomain,
+          cloudflareDomains: prevState.cloudflareDomains,
+          ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun }),
+          ...(forceFreshTabsNextRun ? { tabRegistry: {} } : {}),
+        };
+        await resetState();
+        await setState(keepSettings);
+        chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => { });
+        await sleepWithStop(500);
+      } else {
+        await setState({
+          autoRunSkipFailures,
+          ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun }),
         });
       }
-      const resumeStep = getFirstUnfinishedStep(currentState.stepStatuses);
-      if (resumeStep && hasSavedProgress(currentState.stepStatuses)) {
-        startStep = resumeStep;
-        useExistingProgress = true;
-      } else if (hasSavedProgress(currentState.stepStatuses)) {
-        await addLog('当前流程已全部处理，将按“重新开始”新开一轮自动运行。', 'info');
+
+      if (forceFreshTabsNextRun) {
+        await addLog(`上一轮尝试已放弃，当前开始第 ${targetRun}/${totalRuns} 轮第 ${attemptRun} 次尝试。`, 'warn');
+        forceFreshTabsNextRun = false;
       }
-      continueCurrentOnFirstAttempt = false;
-    }
 
-    if (!useExistingProgress) {
-      // Reset everything at the start of each fresh attempt (keep user settings).
-      const prevState = await getState();
-      const keepSettings = {
-        vpsUrl: prevState.vpsUrl,
-        vpsPassword: prevState.vpsPassword,
-        customPassword: prevState.customPassword,
-        autoRunSkipFailures: prevState.autoRunSkipFailures,
-        autoRunDelayEnabled: prevState.autoRunDelayEnabled,
-        autoRunDelayMinutes: prevState.autoRunDelayMinutes,
-        mailProvider: prevState.mailProvider,
-        emailGenerator: prevState.emailGenerator,
-        inbucketHost: prevState.inbucketHost,
-        inbucketMailbox: prevState.inbucketMailbox,
-        cloudflareDomain: prevState.cloudflareDomain,
-        cloudflareDomains: prevState.cloudflareDomains,
-        ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun: attemptRuns }),
-        ...(forceFreshTabsNextRun ? { tabRegistry: {} } : {}),
-      };
-      await resetState();
-      await setState(keepSettings);
-      chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => { });
-      await sleepWithStop(500);
-    } else {
-      await setState({
-        autoRunSkipFailures,
-        ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun: attemptRuns }),
-      });
-    }
-
-    if (forceFreshTabsNextRun) {
-      await addLog(`兜底模式：上一轮已放弃，当前开始第 ${attemptRuns} 次尝试，将使用新线程继续补足第 ${targetRun}/${totalRuns} 轮。`, 'warn');
-      forceFreshTabsNextRun = false;
-    }
-
-    try {
-      throwIfStopped();
-      await broadcastAutoRunStatus('running', {
-        currentRun: targetRun,
-        totalRuns,
-        attemptRun: attemptRuns,
-      });
-
-      await runAutoSequenceFromStep(startStep, {
-        targetRun,
-        totalRuns,
-        attemptRuns,
-        continued: useExistingProgress,
-      });
-
-      successfulRuns += 1;
-      autoRunCurrentRun = successfulRuns;
-      await addLog(`=== 目标 ${successfulRuns}/${totalRuns} 轮已完成（第 ${attemptRuns} 次尝试成功）===`, 'ok');
-      continue;
-    } catch (err) {
-      if (isStopError(err)) {
-        await addLog(`目标 ${targetRun}/${totalRuns} 轮已被用户停止`, 'warn');
-        await broadcastAutoRunStatus('stopped', {
+      try {
+        throwIfStopped();
+        await broadcastAutoRunStatus('running', {
           currentRun: targetRun,
           totalRuns,
-          attemptRun: attemptRuns,
+          attemptRun,
         });
+
+        await runAutoSequenceFromStep(startStep, {
+          targetRun,
+          totalRuns,
+          attemptRuns: attemptRun,
+          continued: useExistingProgress,
+        });
+
+        roundSummary.status = 'success';
+        successfulRuns += 1;
+        await addLog(`=== 第 ${targetRun}/${totalRuns} 轮完成（第 ${attemptRun} 次尝试成功）===`, 'ok');
         break;
-      }
+      } catch (err) {
+        if (isStopError(err)) {
+          stoppedEarly = true;
+          await addLog(`第 ${targetRun}/${totalRuns} 轮已被用户停止`, 'warn');
+          await broadcastAutoRunStatus('stopped', {
+            currentRun: targetRun,
+            totalRuns,
+            attemptRun,
+          });
+          break;
+        }
 
-      if (isRestartCurrentAttemptError(err)) {
-        await addLog(`目标 ${targetRun}/${totalRuns} 轮检测到当前邮箱已存在，当前线程已放弃，将重新开始新一轮。`, 'warn');
-        cancelPendingCommands('当前线程因邮箱已存在而放弃。');
+        const reason = getErrorMessage(err);
+        roundSummary.failureReasons.push(reason);
+        const canRetry = attemptRun <= AUTO_RUN_MAX_RETRIES_PER_ROUND;
+
+        if (canRetry) {
+          const retryIndex = attemptRun;
+          if (isRestartCurrentAttemptError(err)) {
+            await addLog(`第 ${targetRun}/${totalRuns} 轮第 ${attemptRun} 次尝试需要整轮重开：${reason}`, 'warn');
+          } else {
+            await addLog(`第 ${targetRun}/${totalRuns} 轮第 ${attemptRun} 次尝试失败：${reason}`, 'error');
+          }
+          cancelPendingCommands('当前尝试已放弃。');
+          await broadcastStopToContentScripts();
+          await broadcastAutoRunStatus('retrying', {
+            currentRun: targetRun,
+            totalRuns,
+            attemptRun,
+          });
+          forceFreshTabsNextRun = true;
+          await addLog(
+            `自动重试：${Math.round(AUTO_RUN_RETRY_DELAY_MS / 1000)} 秒后开始第 ${targetRun}/${totalRuns} 轮第 ${attemptRun + 1} 次尝试（第 ${retryIndex}/${AUTO_RUN_MAX_RETRIES_PER_ROUND} 次重试）。`,
+            'warn'
+          );
+          await sleepWithStop(AUTO_RUN_RETRY_DELAY_MS);
+          attemptRun += 1;
+          reuseExistingProgress = false;
+          continue;
+        }
+
+        roundSummary.status = 'failed';
+        roundSummary.finalFailureReason = reason;
+        await addLog(`第 ${targetRun}/${totalRuns} 轮最终失败：${reason}`, 'error');
+        await addLog(`第 ${targetRun}/${totalRuns} 轮已达到 ${AUTO_RUN_MAX_RETRIES_PER_ROUND} 次重试上限，继续下一轮。`, 'warn');
+        cancelPendingCommands('当前轮已达到重试上限。');
         await broadcastStopToContentScripts();
-        await broadcastAutoRunStatus('retrying', {
-          currentRun: targetRun,
-          totalRuns,
-          attemptRun: attemptRuns,
-        });
         forceFreshTabsNextRun = true;
-        maxAttempts = Math.max(maxAttempts, Math.min(forcedRetryCap, attemptRuns + 1));
-        continue;
-      }
-
-      if (!autoRunSkipFailures) {
-        await addLog(`目标 ${targetRun}/${totalRuns} 轮失败：${err.message}`, 'error');
-        await broadcastAutoRunStatus('stopped', {
-          currentRun: targetRun,
-          totalRuns,
-          attemptRun: attemptRuns,
-        });
         break;
+      } finally {
+        reuseExistingProgress = false;
+        continueCurrentOnFirstAttempt = false;
       }
+    }
 
-      await addLog(`目标 ${targetRun}/${totalRuns} 轮的第 ${attemptRuns} 次尝试失败：${err.message}`, 'error');
-      await addLog('兜底开关已开启：将放弃当前线程，重新开一轮继续补足目标次数。', 'warn');
-      cancelPendingCommands('当前尝试已放弃。');
-      await broadcastStopToContentScripts();
-      await broadcastAutoRunStatus('retrying', {
-        currentRun: targetRun,
-        totalRuns,
-        attemptRun: attemptRuns,
-      });
-      forceFreshTabsNextRun = true;
+    if (stoppedEarly) {
+      break;
     }
   }
 
-  if (!stopRequested && autoRunSkipFailures && successfulRuns < totalRuns && attemptRuns >= maxAttempts) {
-    await addLog(`已达到安全重试上限（${attemptRuns} 次尝试），当前仅完成 ${successfulRuns}/${totalRuns} 轮。`, 'error');
+  await logAutoRunFinalSummary(totalRuns, roundSummaries);
+
+  if (stopRequested || stoppedEarly) {
+    await addLog(`=== 已停止，完成 ${successfulRuns}/${autoRunTotalRuns} 轮 ===`, 'warn');
     await broadcastAutoRunStatus('stopped', {
-      currentRun: successfulRuns,
+      currentRun: autoRunCurrentRun,
       totalRuns: autoRunTotalRuns,
-      attemptRun: attemptRuns,
-    });
-  } else if (stopRequested) {
-    await addLog(`=== 已停止，完成 ${successfulRuns}/${autoRunTotalRuns} 轮，共尝试 ${attemptRuns} 次 ===`, 'warn');
-    await broadcastAutoRunStatus('stopped', {
-      currentRun: successfulRuns,
-      totalRuns: autoRunTotalRuns,
-      attemptRun: attemptRuns,
-    });
-  } else if (successfulRuns >= autoRunTotalRuns) {
-    await addLog(`=== 全部 ${autoRunTotalRuns} 轮均已成功完成，共尝试 ${attemptRuns} 次 ===`, 'ok');
-    await broadcastAutoRunStatus('complete', {
-      currentRun: successfulRuns,
-      totalRuns: autoRunTotalRuns,
-      attemptRun: attemptRuns,
+      attemptRun: autoRunAttemptRun,
     });
   } else {
-    await addLog(`=== 已停止，完成 ${successfulRuns}/${autoRunTotalRuns} 轮，共尝试 ${attemptRuns} 次 ===`, 'warn');
-    await broadcastAutoRunStatus('stopped', {
-      currentRun: successfulRuns,
+    await addLog(`=== 全部 ${autoRunTotalRuns} 轮已执行完成，成功 ${successfulRuns} 轮 ===`, 'ok');
+    await broadcastAutoRunStatus('complete', {
+      currentRun: autoRunTotalRuns,
       totalRuns: autoRunTotalRuns,
-      attemptRun: attemptRuns,
+      attemptRun: autoRunAttemptRun,
     });
   }
   autoRunActive = false;
-  autoRunAttemptRun = attemptRuns;
-  await setState(getAutoRunStatusPayload(stopRequested ? 'stopped' : (successfulRuns >= autoRunTotalRuns ? 'complete' : 'stopped'), {
-    currentRun: successfulRuns,
+  await setState(getAutoRunStatusPayload(stopRequested || stoppedEarly ? 'stopped' : 'complete', {
+    currentRun: stopRequested || stoppedEarly ? autoRunCurrentRun : autoRunTotalRuns,
     totalRuns: autoRunTotalRuns,
-    attemptRun: attemptRuns,
+    attemptRun: autoRunAttemptRun,
   }));
   clearStopRequest();
 }
-
 async function waitForResume() {
   throwIfStopped();
   const state = await getState();
@@ -3544,15 +3623,13 @@ async function resumeAutoRun() {
   const totalRuns = state.autoRunTotalRuns || 1;
   const currentRun = state.autoRunCurrentRun || 1;
   const attemptRun = state.autoRunAttemptRun || 1;
-  const successfulRuns = Math.max(0, currentRun - 1);
 
   await addLog('检测到自动流程暂停上下文已丢失，正在从当前进度恢复自动运行...', 'warn');
   autoRunLoop(totalRuns, {
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
     mode: 'continue',
     resumeCurrentRun: currentRun,
-    resumeSuccessfulRuns: successfulRuns,
-    resumeAttemptRunsProcessed: Math.max(0, attemptRun - 1),
+    resumeAttemptRun: attemptRun,
   });
   return true;
 }

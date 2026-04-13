@@ -172,10 +172,10 @@
         </div>
       </div>
       <div class="data-row data-check-row">
-        <span class="data-label">兜底</span>
+        <span class="data-label">自动重试</span>
         <label class="data-check" for="input-auto-skip-failures">
-          <input type="checkbox" id="input-auto-skip-failures" />
-          <span>出现错误无法继续时，直接丢弃当前线程并新开一轮，直到补足目标运行次数</span>
+          <input type="checkbox" id="input-auto-skip-failures" checked />
+          <span>自动模式遇到单步错误时，会先显示报错，再等待几秒后从当前轮第 1 步重新开始</span>
         </label>
       </div>
       <div class="data-row">
