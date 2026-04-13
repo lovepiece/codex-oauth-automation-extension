@@ -499,17 +499,17 @@ header {
   gap: 2px;
 }
 
+.section-mini-copy .section-label {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
 .section-mini-actions {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
   justify-content: flex-end;
-}
-
-.section-hint {
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 .data-row {
@@ -666,6 +666,26 @@ header {
   color: var(--blue);
   background: var(--blue-soft);
   box-shadow: 0 0 0 1px var(--blue-glow);
+}
+
+.choice-btn:disabled {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.choice-btn:disabled:hover {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+#btn-fetch-email,
+#btn-save-settings {
+  padding-inline: 10px;
+  flex-shrink: 0;
 }
 
 .data-inline-btn {

@@ -52,7 +52,7 @@
 - 支持自定义密码；留空时自动生成强密码
 - 自动显示当前使用中的密码，便于后续保存
 - 自动获取注册验证码与登录验证码
-- 支持 `Hotmail`：直接使用 `邮箱 + 客户端 ID + 刷新令牌（refresh token）` 刷新微软令牌，并通过 Microsoft Graph 读取最新邮件
+- 支持 `Hotmail`：继续使用 `邮箱 + 客户端 ID + 刷新令牌（refresh token）`，并可在远程服务与本地助手两种模式间切换
 - 支持 `QQ Mail`、`163 Mail`、`Inbucket mailbox`
 - 支持从 DuckDuckGo Email Protection 自动生成新的 `@duck.com` 地址
 - 支持基于 Cloudflare 自定义域名自动生成随机邮箱前缀
@@ -137,13 +137,19 @@ Step 1 和 Step 9 都依赖这个地址。
 
 说明：
 
-- `Hotmail` 通过侧边栏里的 Hotmail 账号池选择账号，并直接访问 Microsoft Graph 邮件接口
+- `Hotmail` 通过侧边栏里的 Hotmail 账号池选择账号，可切换为远程服务模式或本地助手模式
 - `QQ`、`163`、`163 VIP` 用于直接轮询网页邮箱
 - `Inbucket` 通过你在侧边栏里配置的 host 访问 `mailbox` 页面：`https://<your-inbucket-host>/m/<mailbox>/`
 
 ### `Hotmail 账号池`
 
 仅当 `Mail = Hotmail` 时使用。
+
+可配置项：
+
+- `接码模式`
+- `远程服务地址`
+- `本地助手地址`
 
 每条账号支持保存：
 
@@ -154,10 +160,60 @@ Step 1 和 Step 9 都依赖这个地址。
 
 使用方式：
 
-- 先新增账号
+- 先选择 Hotmail 接码模式
+- 远程模式下填写你自己的远程服务地址
+- 本地模式下填写本地助手地址（默认 `http://127.0.0.1:17373`）
+- Windows 运行仓库根目录的 `start-hotmail-helper.bat`
+- macOS 运行仓库根目录的 `start-hotmail-helper.command`
+- 本地 helper 当前仅依赖 Python 标准库，无需额外安装第三方 Python 包
+- 再新增账号
 - 点击 `校验`
 - 校验通过后，可点击 `测试收信`
 - Auto 模式每轮会自动选用一个可用账号
+
+#### 本地 helper 启动命令
+
+Windows：
+
+```powershell
+.\start-hotmail-helper.bat
+```
+
+macOS：
+
+```bash
+chmod +x ./start-hotmail-helper.command
+./start-hotmail-helper.command
+```
+
+如果你不想走启动脚本，也可以直接运行 Python 程序本体：
+
+```bash
+python scripts/hotmail_helper.py
+```
+
+如果你的环境里命令是 `python3`：
+
+```bash
+python3 scripts/hotmail_helper.py
+```
+
+#### 启动成功标志
+
+本地 helper 启动成功后，终端会输出：
+
+```text
+Hotmail helper listening on http://127.0.0.1:17373
+```
+
+看到这行再回到扩展里点 `校验` 或 `复制最新验证码`。
+
+#### 最小排错说明
+
+- 如果提示 `Python 3 not found`，先安装 Python 3.10+
+- 如果 helper 已启动但扩展仍报连接失败，先确认模式切到了 `本地助手`
+- 确认本地助手地址与终端输出一致，默认应为 `http://127.0.0.1:17373`
+- 如果地址一致仍失败，再检查是否有端口占用或终端里是否已经抛出异常
 
 ### `Mailbox`
 
@@ -411,7 +467,7 @@ Cloudflare 模式下，插件不会再调用 Cloudflare API 创建路由。
 
 支持：
 
-- `Hotmail`（Microsoft Graph 邮件接口）
+- `Hotmail`（远程服务 / 本地助手）
 - `content/qq-mail.js`
 - `content/mail-163.js`
 - `content/inbucket-mail.js`
