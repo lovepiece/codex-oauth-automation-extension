@@ -193,6 +193,19 @@
         </div>
       </div>
       <div class="data-row">
+        <span class="data-label">步间随机</span>
+        <div class="data-inline auto-delay-inline">
+          <div class="auto-delay-controls">
+            <input type="number" id="input-auto-step-delay-min-seconds" class="data-input auto-delay-input" value="12" min="0"
+              max="600" step="1" title="自动运行每一步执行前的最小随机等待秒数" />
+            <span class="data-unit">~</span>
+            <input type="number" id="input-auto-step-delay-max-seconds" class="data-input auto-delay-input" value="18" min="0"
+              max="600" step="1" title="自动运行每一步执行前的最大随机等待秒数" />
+            <span class="data-unit">秒</span>
+          </div>
+        </div>
+      </div>
+      <div class="data-row">
         <span class="data-label">OAuth</span>
         <span id="display-oauth-url" class="data-value mono truncate">等待中...</span>
       </div>

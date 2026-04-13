@@ -85,6 +85,8 @@ const inputRunCount = document.getElementById('input-run-count');
 const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
 const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes');
+const inputAutoStepDelayMinSeconds = document.getElementById('input-auto-step-delay-min-seconds');
+const inputAutoStepDelayMaxSeconds = document.getElementById('input-auto-step-delay-max-seconds');
 const autoStartModal = document.getElementById('auto-start-modal');
 const autoStartTitle = autoStartModal?.querySelector('.modal-title');
 const autoStartMessage = document.getElementById('auto-start-message');
@@ -108,6 +110,10 @@ const SKIPPABLE_STEPS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 const AUTO_DELAY_MIN_MINUTES = 1;
 const AUTO_DELAY_MAX_MINUTES = 1440;
 const AUTO_DELAY_DEFAULT_MINUTES = 30;
+const AUTO_STEP_DELAY_MIN_SECONDS = 0;
+const AUTO_STEP_DELAY_MAX_SECONDS = 600;
+const AUTO_STEP_DELAY_DEFAULT_MIN_SECONDS = 12;
+const AUTO_STEP_DELAY_DEFAULT_MAX_SECONDS = 18;
 const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 
 let latestState = null;
@@ -447,6 +453,23 @@ function normalizeAutoDelayMinutes(value) {
   return Math.min(AUTO_DELAY_MAX_MINUTES, Math.max(AUTO_DELAY_MIN_MINUTES, Math.floor(numeric)));
 }
 
+function normalizeAutoStepDelaySeconds(value, fallback = AUTO_STEP_DELAY_DEFAULT_MIN_SECONDS) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(AUTO_STEP_DELAY_MAX_SECONDS, Math.max(AUTO_STEP_DELAY_MIN_SECONDS, Math.floor(numeric)));
+}
+
+function normalizeAutoStepDelayRange(minValue, maxValue) {
+  const minSeconds = normalizeAutoStepDelaySeconds(minValue, AUTO_STEP_DELAY_DEFAULT_MIN_SECONDS);
+  const maxSeconds = Math.max(
+    minSeconds,
+    normalizeAutoStepDelaySeconds(maxValue, AUTO_STEP_DELAY_DEFAULT_MAX_SECONDS)
+  );
+  return { minSeconds, maxSeconds };
+}
+
 function updateAutoDelayInputState() {
   const scheduled = isAutoRunScheduledPhase();
   inputAutoDelayEnabled.disabled = scheduled;
@@ -598,6 +621,10 @@ function collectSettingsPayload() {
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
   ) || activeDomain;
+  const autoStepDelayRange = normalizeAutoStepDelayRange(
+    inputAutoStepDelayMinSeconds.value,
+    inputAutoStepDelayMaxSeconds.value
+  );
   return {
     panelMode: selectPanelMode.value,
     vpsUrl: inputVpsUrl.value.trim(),
@@ -617,6 +644,8 @@ function collectSettingsPayload() {
     autoRunSkipFailures: inputAutoSkipFailures.checked,
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
+    autoStepRandomDelayMinSeconds: autoStepDelayRange.minSeconds,
+    autoStepRandomDelayMaxSeconds: autoStepDelayRange.maxSeconds,
   };
 }
 
@@ -858,6 +887,12 @@ function applySettingsState(state) {
   inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
   inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
   inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state?.autoRunDelayMinutes));
+  const autoStepDelayRange = normalizeAutoStepDelayRange(
+    state?.autoStepRandomDelayMinSeconds,
+    state?.autoStepRandomDelayMaxSeconds
+  );
+  inputAutoStepDelayMinSeconds.value = String(autoStepDelayRange.minSeconds);
+  inputAutoStepDelayMaxSeconds.value = String(autoStepDelayRange.maxSeconds);
   if (state?.autoRunTotalRuns) {
     inputRunCount.value = String(state.autoRunTotalRuns);
   }
@@ -2380,6 +2415,33 @@ inputAutoDelayMinutes.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+function syncAutoStepDelayInputs() {
+  const range = normalizeAutoStepDelayRange(
+    inputAutoStepDelayMinSeconds.value,
+    inputAutoStepDelayMaxSeconds.value
+  );
+  inputAutoStepDelayMinSeconds.value = String(range.minSeconds);
+  inputAutoStepDelayMaxSeconds.value = String(range.maxSeconds);
+}
+
+inputAutoStepDelayMinSeconds.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputAutoStepDelayMinSeconds.addEventListener('blur', () => {
+  syncAutoStepDelayInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputAutoStepDelayMaxSeconds.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputAutoStepDelayMaxSeconds.addEventListener('blur', () => {
+  syncAutoStepDelayInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 // ============================================================
 // Listen for Background broadcasts
 // ============================================================
@@ -2476,6 +2538,14 @@ chrome.runtime.onMessage.addListener((message) => {
       }
       if (message.payload.autoRunDelayMinutes !== undefined) {
         inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(message.payload.autoRunDelayMinutes));
+      }
+      if (message.payload.autoStepRandomDelayMinSeconds !== undefined || message.payload.autoStepRandomDelayMaxSeconds !== undefined) {
+        const autoStepDelayRange = normalizeAutoStepDelayRange(
+          message.payload.autoStepRandomDelayMinSeconds ?? inputAutoStepDelayMinSeconds.value,
+          message.payload.autoStepRandomDelayMaxSeconds ?? inputAutoStepDelayMaxSeconds.value
+        );
+        inputAutoStepDelayMinSeconds.value = String(autoStepDelayRange.minSeconds);
+        inputAutoStepDelayMaxSeconds.value = String(autoStepDelayRange.maxSeconds);
       }
       break;
     }
