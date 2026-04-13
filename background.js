@@ -2805,7 +2805,11 @@ async function handleMessage(message, sender) {
         await setPersistentSettings({ emailPrefix: message.payload.emailPrefix });
         await setState({ emailPrefix: message.payload.emailPrefix });
       }
-      await executeStep(step);
+      if (doesStepUseCompletionSignal(step)) {
+        await executeStepViaCompletionSignal(step);
+      } else {
+        await executeStep(step);
+      }
       return { ok: true };
     }
 
@@ -3083,6 +3087,7 @@ const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
 const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([4, 7, 8]);
+const STEP_COMPLETION_SIGNAL_STEPS = new Set([1, 2, 3, 5, 6, 9]);
 
 function waitForStepComplete(step, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -3102,6 +3107,10 @@ function waitForStepComplete(step, timeoutMs = 120000) {
       reject: (err) => { clearTimeout(timer); stepWaiters.delete(step); reject(err); },
     });
   });
+}
+
+function doesStepUseCompletionSignal(step) {
+  return STEP_COMPLETION_SIGNAL_STEPS.has(step);
 }
 
 function notifyStepComplete(step, payload) {
@@ -3127,6 +3136,66 @@ async function completeStepFromBackground(step, payload = {}) {
   await addLog(`步骤 ${step} 已完成`, 'ok');
   await handleStepData(step, payload);
   notifyStepComplete(step, payload);
+}
+
+async function finalizeDeferredStepExecutionError(step, error) {
+  const latestState = await getState();
+  const currentStatus = latestState.stepStatuses?.[step];
+  if (currentStatus === 'completed' || currentStatus === 'failed' || currentStatus === 'stopped') {
+    return;
+  }
+
+  if (isStopError(error)) {
+    await setStepStatus(step, 'stopped');
+    await addLog(`步骤 ${step} 已被用户停止`, 'warn');
+    return;
+  }
+
+  await setStepStatus(step, 'failed');
+  await addLog(`步骤 ${step} 失败：${getErrorMessage(error)}`, 'error');
+}
+
+async function executeStepViaCompletionSignal(step, timeoutMs = AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS) {
+  const completionResultPromise = waitForStepComplete(step, timeoutMs).then(
+    payload => ({ ok: true, payload }),
+    error => ({ ok: false, error }),
+  );
+
+  let executeError = null;
+  try {
+    await executeStep(step, { deferRetryableTransportError: true });
+  } catch (err) {
+    executeError = err;
+    if (isStopError(err) || !isRetryableContentScriptTransportError(err)) {
+      notifyStepError(step, getErrorMessage(err));
+    }
+  }
+
+  const completionResult = await completionResultPromise;
+  if (completionResult.ok) {
+    if (executeError) {
+      console.warn(
+        LOG_PREFIX,
+        `[executeStepViaCompletionSignal] step ${step} completed after deferred execute error: ${getErrorMessage(executeError)}`
+      );
+    }
+    return completionResult.payload;
+  }
+
+  if (executeError && isRetryableContentScriptTransportError(executeError)) {
+    const completionMessage = getErrorMessage(completionResult.error);
+    if (/等待超时/.test(completionMessage)) {
+      await finalizeDeferredStepExecutionError(step, executeError);
+      throw executeError;
+    }
+    throw completionResult.error;
+  }
+
+  if (executeError) {
+    throw executeError;
+  }
+
+  throw completionResult.error;
 }
 
 async function waitForRunningStepsToFinish(payload = {}) {
@@ -3204,7 +3273,8 @@ async function requestStop(options = {}) {
 // Step Execution
 // ============================================================
 
-async function executeStep(step) {
+async function executeStep(step, options = {}) {
+  const { deferRetryableTransportError = false } = options;
   console.log(LOG_PREFIX, `Executing step ${step}`);
   throwIfStopped();
   await setStepStatus(step, 'running');
@@ -3238,8 +3308,15 @@ async function executeStep(step) {
       await addLog(`步骤 ${step} 已被用户停止`, 'warn');
       throw err;
     }
-    await setStepStatus(step, 'failed');
-    await addLog(`步骤 ${step} 失败：${err.message}`, 'error');
+    if (!(deferRetryableTransportError && doesStepUseCompletionSignal(step) && isRetryableContentScriptTransportError(err))) {
+      await setStepStatus(step, 'failed');
+      await addLog(`步骤 ${step} 失败：${err.message}`, 'error');
+    } else {
+      console.warn(
+        LOG_PREFIX,
+        `[executeStep] deferring retryable transport error for step ${step}: ${getErrorMessage(err)}`
+      );
+    }
     throw err;
   }
 }
@@ -3266,27 +3343,12 @@ async function executeStepAndWait(step, delayAfter = 2000) {
     await executeStep(step);
     const latestState = await getState();
     await addLog(`自动运行：步骤 ${step} 已执行返回，当前状态为 ${latestState.stepStatuses?.[step] || 'pending'}，准备继续后续步骤。`, 'info');
-  } else {
+  } else if (doesStepUseCompletionSignal(step)) {
     await addLog(`自动运行：步骤 ${step} 已发起，正在等待完成信号（超时 ${AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS / 1000} 秒）。`, 'info');
-    const completionResultPromise = waitForStepComplete(step, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS).then(
-      payload => ({ ok: true, payload }),
-      error => ({ ok: false, error }),
-    );
-
-    try {
-      await executeStep(step);
-    } catch (err) {
-      notifyStepError(step, getErrorMessage(err));
-      await completionResultPromise;
-      throw err;
-    }
-
-    const completionResult = await completionResultPromise;
-    if (!completionResult.ok) {
-      throw completionResult.error;
-    }
-
+    await executeStepViaCompletionSignal(step, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
     await addLog(`自动运行：步骤 ${step} 已收到完成信号，准备继续后续步骤。`, 'info');
+  } else {
+    await executeStep(step);
   }
 
   // Extra delay for page transitions / DOM updates
