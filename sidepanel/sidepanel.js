@@ -131,6 +131,9 @@ const AUTO_STEP_DELAY_MIN_SECONDS = 0;
 const AUTO_STEP_DELAY_MAX_SECONDS = 600;
 const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
+const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
+const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 15;
+const AUTO_RUN_FALLBACK_RISK_RECOMMENDED_THREAD_INTERVAL_MINUTES = 5;
 
 let latestState = null;
 let currentAutoRun = {
@@ -351,29 +354,26 @@ async function openConfirmModal({ title, message, confirmLabel = '确认', confi
   return choice === 'confirm';
 }
 
-function isAutoSkipFailuresPromptDismissed() {
-  return localStorage.getItem(AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY) === '1';
-}
-
-function setAutoSkipFailuresPromptDismissed(dismissed) {
-  if (dismissed) {
-    localStorage.setItem(AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY, '1');
-  } else {
-    localStorage.removeItem(AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY);
-  }
-}
-
-async function openAutoSkipFailuresConfirmModal() {
+async function openConfirmModalWithOption({
+  title,
+  message,
+  confirmLabel = '确认',
+  confirmVariant = 'btn-primary',
+  optionLabel = '不再提示',
+  optionChecked = false,
+  optionDisabled = false,
+}) {
   const result = await openActionModal({
-    title: '兜底说明',
-    message: '开启后，当某一轮失败且无法继续时，会直接放弃当前线程，重新开新一轮，直到补足目标运行次数。线程间隔只在开启兜底且运行次数大于 1 时生效。',
+    title,
+    message,
     actions: [
       { id: null, label: '取消', variant: 'btn-ghost' },
-      { id: 'confirm', label: '确认开启', variant: 'btn-primary' },
+      { id: 'confirm', label: confirmLabel, variant: confirmVariant },
     ],
     option: {
-      label: '不再提示',
-      checked: false,
+      label: optionLabel,
+      checked: optionChecked,
+      disabled: optionDisabled,
     },
     buildResult: (choice, meta) => ({
       choice,
@@ -383,7 +383,69 @@ async function openAutoSkipFailuresConfirmModal() {
 
   return {
     confirmed: result?.choice === 'confirm',
-    dismissPrompt: Boolean(result?.optionChecked),
+    optionChecked: Boolean(result?.optionChecked),
+  };
+}
+
+function isPromptDismissed(storageKey) {
+  return localStorage.getItem(storageKey) === '1';
+}
+
+function setPromptDismissed(storageKey, dismissed) {
+  if (dismissed) {
+    localStorage.setItem(storageKey, '1');
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+function isAutoSkipFailuresPromptDismissed() {
+  return isPromptDismissed(AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY);
+}
+
+function setAutoSkipFailuresPromptDismissed(dismissed) {
+  setPromptDismissed(AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
+function isAutoRunFallbackRiskPromptDismissed() {
+  return isPromptDismissed(AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY);
+}
+
+function setAutoRunFallbackRiskPromptDismissed(dismissed) {
+  setPromptDismissed(AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
+async function openAutoSkipFailuresConfirmModal() {
+  const result = await openConfirmModalWithOption({
+    title: '兜底说明',
+    message: '开启后，当某一轮失败且无法继续时，会直接放弃当前线程，重新开新一轮，直到补足目标运行次数。线程间隔只在开启兜底且运行次数大于 1 时生效。',
+    confirmLabel: '确认开启',
+  });
+
+  return {
+    confirmed: result.confirmed,
+    dismissPrompt: result.optionChecked,
+  };
+}
+
+function shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures) {
+  return Boolean(autoRunSkipFailures) && totalRuns >= AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS;
+}
+
+async function openAutoRunFallbackRiskConfirmModal(totalRuns, fallbackThreadIntervalMinutes) {
+  const intervalLabel = Number.isFinite(fallbackThreadIntervalMinutes)
+    ? `${fallbackThreadIntervalMinutes} 分钟`
+    : '未设置';
+
+  const result = await openConfirmModalWithOption({
+    title: '自动运行风险提醒',
+    message: `当前设置为 ${totalRuns} 轮自动化，已开启兜底，线程间隔为 ${intervalLabel}。次数太多，可能会因为 IP 短时间注册过多原因而都失败。建议控制在 ${AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS} 轮以下，并将线程间隔设置在 ${AUTO_RUN_FALLBACK_RISK_RECOMMENDED_THREAD_INTERVAL_MINUTES} 分钟以上。是否继续？`,
+    confirmLabel: '继续',
+  });
+
+  return {
+    confirmed: result.confirmed,
+    dismissPrompt: result.optionChecked,
   };
 }
 
@@ -2488,7 +2550,7 @@ btnAutoStartClose?.addEventListener('click', () => resolveModalChoice(null));
 // Auto Run
 btnAutoRun.addEventListener('click', async () => {
   try {
-    const totalRuns = Math.min(50, Math.max(1, parseInt(inputRunCount.value, 10) || 1));
+    const totalRuns = getRunCountValue();
     let mode = 'restart';
 
     if (shouldOfferAutoModeChoice()) {
@@ -2499,6 +2561,25 @@ btnAutoRun.addEventListener('click', async () => {
         return;
       }
       mode = choice;
+    }
+
+    const autoRunSkipFailures = inputAutoSkipFailures.checked;
+    const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
+      inputAutoSkipFailuresThreadIntervalMinutes.value
+    );
+    inputAutoSkipFailuresThreadIntervalMinutes.value = String(fallbackThreadIntervalMinutes);
+
+    if (
+      shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures)
+      && !isAutoRunFallbackRiskPromptDismissed()
+    ) {
+      const result = await openAutoRunFallbackRiskConfirmModal(totalRuns, fallbackThreadIntervalMinutes);
+      if (!result.confirmed) {
+        return;
+      }
+      if (result.dismissPrompt) {
+        setAutoRunFallbackRiskPromptDismissed(true);
+      }
     }
 
     btnAutoRun.disabled = true;
@@ -2515,7 +2596,7 @@ btnAutoRun.addEventListener('click', async () => {
       payload: {
         totalRuns,
         delayMinutes,
-        autoRunSkipFailures: inputAutoSkipFailures.checked,
+        autoRunSkipFailures,
         mode,
       },
     });
