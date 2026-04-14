@@ -11,7 +11,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     || message.type === 'STEP8_FIND_AND_CLICK'
     || message.type === 'STEP8_GET_STATE'
     || message.type === 'STEP8_TRIGGER_CONTINUE'
-    || message.type === 'PREPARE_LOGIN_CODE'
+    || message.type === 'GET_LOGIN_AUTH_STATE'
     || message.type === 'PREPARE_SIGNUP_VERIFICATION'
     || message.type === 'RESEND_VERIFICATION_CODE'
   ) {
@@ -52,10 +52,10 @@ async function handleCommand(message) {
     case 'FILL_CODE':
       // Step 4 = signup code, Step 7 = login code (same handler)
       return await fillVerificationCode(message.step, message.payload);
+    case 'GET_LOGIN_AUTH_STATE':
+      return serializeLoginAuthState(inspectLoginAuthState());
     case 'PREPARE_SIGNUP_VERIFICATION':
       return await prepareSignupVerificationFlow(message.payload);
-    case 'PREPARE_LOGIN_CODE':
-      return await prepareLoginCodeFlow();
     case 'RESEND_VERIFICATION_CODE':
       return await resendVerificationCode(message.step);
     case 'STEP8_FIND_AND_CLICK':
@@ -176,86 +176,9 @@ function isEmailVerificationPage() {
   return /\/email-verification(?:[/?#]|$)/i.test(location.pathname || '');
 }
 
-async function prepareLoginCodeFlow(timeout = 15000) {
-  const readyTarget = getVerificationCodeTarget();
-  if (readyTarget) {
-    log('步骤 7：验证码输入框已就绪。');
-    return { ready: true, mode: readyTarget.type };
-  }
-
-  if (isEmailVerificationPage() && isVerificationPageStillVisible()) {
-    log('步骤 7：已进入邮箱验证码页面，正在等待验证码输入框或重发入口稳定。');
-    return { ready: true, mode: 'verification_page' };
-  }
-
-  const initialRestartSignal = getStep7RestartFromStep6Signal();
-  if (initialRestartSignal) {
-    log('步骤 7：检测到登录页超时报错，准备回到步骤 6 重新发起登录验证码流程...', 'warn');
-    return initialRestartSignal;
-  }
-
-  const start = Date.now();
-  let switchClickCount = 0;
-  let lastSwitchAttemptAt = 0;
-  let loggedPasswordPage = false;
-  let loggedVerificationPage = false;
-
-  while (Date.now() - start < timeout) {
-    throwIfStopped();
-
-    const target = getVerificationCodeTarget();
-    if (target) {
-      log('步骤 7：验证码页面已就绪。');
-      return { ready: true, mode: target.type };
-    }
-
-    if (isEmailVerificationPage() && isVerificationPageStillVisible()) {
-      if (!loggedVerificationPage) {
-        loggedVerificationPage = true;
-        log('步骤 7：页面已进入邮箱验证码流程，继续等待验证码输入框渲染...');
-      }
-      await sleep(250);
-      continue;
-    }
-
-    const restartSignal = getStep7RestartFromStep6Signal();
-    if (restartSignal) {
-      log('步骤 7：检测到登录页超时报错，准备回到步骤 6 重新发起登录验证码流程...', 'warn');
-      return restartSignal;
-    }
-
-    const passwordInput = document.querySelector('input[type="password"]');
-    const switchTrigger = findOneTimeCodeLoginTrigger();
-
-    if (switchTrigger && (switchClickCount === 0 || Date.now() - lastSwitchAttemptAt > 1500)) {
-      switchClickCount += 1;
-      lastSwitchAttemptAt = Date.now();
-      loggedPasswordPage = false;
-      log('步骤 7：检测到密码页，正在切换到一次性验证码登录...');
-      await humanPause(350, 900);
-      const verificationRequestedAt = Date.now();
-      simulateClick(switchTrigger);
-      await sleep(1200);
-      return { ready: true, mode: 'verification_switch', verificationRequestedAt };
-    }
-
-    if (passwordInput && !loggedPasswordPage) {
-      loggedPasswordPage = true;
-      log('步骤 7：正在等待密码页上的一次性验证码登录入口...');
-    }
-
-    await sleep(200);
-  }
-
-  throw new Error('无法切换到一次性验证码验证页面。URL: ' + location.href);
-}
-
 async function resendVerificationCode(step, timeout = 45000) {
   if (step === 7) {
-    const prepareResult = await prepareLoginCodeFlow();
-    if (prepareResult?.restartFromStep6) {
-      return prepareResult;
-    }
+    await waitForLoginVerificationPageReady();
   }
 
   const start = Date.now();
@@ -730,26 +653,248 @@ function getLoginTimeoutErrorPageState() {
   });
 }
 
-function isSignupPasswordErrorPage() {
-  return Boolean(getSignupPasswordTimeoutErrorPageState());
+function getLoginEmailInput() {
+  const input = document.querySelector(
+    'input[type="email"], input[name="email"], input[name="username"], input[id*="email"], input[placeholder*="email" i], input[placeholder*="Email"]'
+  );
+  return input && isVisibleElement(input) ? input : null;
 }
 
-function buildStep7RestartFromStep6Marker(reason, url = location.href) {
-  return `STEP7_RESTART_FROM_STEP6::${reason || 'unknown'}::${url || ''}`;
+function getLoginPasswordInput() {
+  const input = document.querySelector('input[type="password"]');
+  return input && isVisibleElement(input) ? input : null;
 }
 
-function getStep7RestartFromStep6Signal() {
-  const timeoutPage = getLoginTimeoutErrorPageState();
-  if (!timeoutPage) {
-    return null;
+function getLoginSubmitButton({ allowDisabled = false } = {}) {
+  const direct = document.querySelector('button[type="submit"], input[type="submit"]');
+  if (direct && isVisibleElement(direct) && (allowDisabled || isActionEnabled(direct))) {
+    return direct;
   }
 
-  return {
-    error: buildStep7RestartFromStep6Marker('login_timeout_error_page', timeoutPage.url),
-    restartFromStep6: true,
-    reason: 'login_timeout_error_page',
-    url: timeoutPage.url,
+  const candidates = document.querySelectorAll(
+    'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+  );
+  return Array.from(candidates).find((el) => {
+    if (!isVisibleElement(el) || (!allowDisabled && !isActionEnabled(el))) return false;
+    const text = getActionText(el);
+    if (!text || ONE_TIME_CODE_LOGIN_PATTERN.test(text)) return false;
+    return /continue|next|submit|sign\s*in|log\s*in|继续|下一步|登录/i.test(text);
+  }) || null;
+}
+
+function inspectLoginAuthState() {
+  const retryState = getLoginTimeoutErrorPageState();
+  const verificationTarget = getVerificationCodeTarget();
+  const passwordInput = getLoginPasswordInput();
+  const emailInput = getLoginEmailInput();
+  const switchTrigger = findOneTimeCodeLoginTrigger();
+  const submitButton = getLoginSubmitButton({ allowDisabled: true });
+  const verificationVisible = isVerificationPageStillVisible();
+  const addPhonePage = isAddPhonePageReady();
+  const consentReady = isStep8Ready();
+  const oauthConsentPage = isOAuthConsentPage();
+  const baseState = {
+    state: 'unknown',
+    url: location.href,
+    path: location.pathname || '',
+    retryButton: retryState?.retryButton || null,
+    retryEnabled: Boolean(retryState?.retryEnabled),
+    titleMatched: Boolean(retryState?.titleMatched),
+    detailMatched: Boolean(retryState?.detailMatched),
+    verificationTarget,
+    passwordInput,
+    emailInput,
+    submitButton,
+    switchTrigger,
+    verificationVisible,
+    addPhonePage,
+    oauthConsentPage,
+    consentReady,
   };
+
+  if (verificationTarget || verificationVisible) {
+    return {
+      ...baseState,
+      state: 'verification_page',
+    };
+  }
+
+  if (retryState) {
+    return {
+      ...baseState,
+      state: 'login_timeout_error_page',
+    };
+  }
+
+  if (addPhonePage) {
+    return {
+      ...baseState,
+      state: 'add_phone_page',
+    };
+  }
+
+  if (oauthConsentPage) {
+    return {
+      ...baseState,
+      state: 'oauth_consent_page',
+    };
+  }
+
+  if (passwordInput || switchTrigger) {
+    return {
+      ...baseState,
+      state: 'password_page',
+    };
+  }
+
+  if (emailInput) {
+    return {
+      ...baseState,
+      state: 'email_page',
+    };
+  }
+
+  return baseState;
+}
+
+function serializeLoginAuthState(snapshot) {
+  return {
+    state: snapshot?.state || 'unknown',
+    url: snapshot?.url || location.href,
+    path: snapshot?.path || location.pathname || '',
+    retryEnabled: Boolean(snapshot?.retryEnabled),
+    titleMatched: Boolean(snapshot?.titleMatched),
+    detailMatched: Boolean(snapshot?.detailMatched),
+    hasVerificationTarget: Boolean(snapshot?.verificationTarget),
+    hasPasswordInput: Boolean(snapshot?.passwordInput),
+    hasEmailInput: Boolean(snapshot?.emailInput),
+    hasSubmitButton: Boolean(snapshot?.submitButton),
+    hasSwitchTrigger: Boolean(snapshot?.switchTrigger),
+    verificationVisible: Boolean(snapshot?.verificationVisible),
+    addPhonePage: Boolean(snapshot?.addPhonePage),
+    oauthConsentPage: Boolean(snapshot?.oauthConsentPage),
+    consentReady: Boolean(snapshot?.consentReady),
+  };
+}
+
+function getLoginAuthStateLabel(snapshot) {
+  switch (snapshot?.state) {
+    case 'verification_page':
+      return '登录验证码页';
+    case 'password_page':
+      return '密码页';
+    case 'email_page':
+      return '邮箱输入页';
+    case 'login_timeout_error_page':
+      return '登录超时报错页';
+    case 'oauth_consent_page':
+      return 'OAuth 授权页';
+    case 'add_phone_page':
+      return '手机号页';
+    default:
+      return '未知页面';
+  }
+}
+
+async function waitForKnownLoginAuthState(timeout = 15000) {
+  const start = Date.now();
+  let snapshot = inspectLoginAuthState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectLoginAuthState();
+    if (snapshot.state !== 'unknown') {
+      return snapshot;
+    }
+    await sleep(200);
+  }
+
+  return snapshot;
+}
+
+async function waitForLoginVerificationPageReady(timeout = 10000) {
+  const start = Date.now();
+  let snapshot = inspectLoginAuthState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectLoginAuthState();
+    if (snapshot.state === 'verification_page') {
+      return snapshot;
+    }
+    if (snapshot.state !== 'unknown') {
+      break;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `当前未进入登录验证码页面，请先重新完成步骤 6。当前状态：${getLoginAuthStateLabel(snapshot)}。URL: ${snapshot?.url || location.href}`
+  );
+}
+
+function createStep6SuccessResult(snapshot, options = {}) {
+  return {
+    step6Outcome: 'success',
+    state: snapshot?.state || 'verification_page',
+    url: snapshot?.url || location.href,
+    via: options.via || '',
+    loginVerificationRequestedAt: options.loginVerificationRequestedAt || null,
+  };
+}
+
+function createStep6RecoverableResult(reason, snapshot, options = {}) {
+  return {
+    step6Outcome: 'recoverable',
+    reason,
+    state: snapshot?.state || 'unknown',
+    url: snapshot?.url || location.href,
+    message: options.message || '',
+    loginVerificationRequestedAt: options.loginVerificationRequestedAt || null,
+  };
+}
+
+function throwForStep6FatalState(snapshot) {
+  switch (snapshot?.state) {
+    case 'oauth_consent_page':
+      throw new Error(`当前页面已进入 OAuth 授权页，未经过登录验证码页，无法完成步骤 6。URL: ${snapshot.url}`);
+    case 'add_phone_page':
+      throw new Error(`当前页面已进入手机号页面，未经过登录验证码页，无法完成步骤 6。URL: ${snapshot.url}`);
+    case 'unknown':
+      throw new Error(`无法识别当前登录页面状态。URL: ${snapshot?.url || location.href}`);
+    default:
+      return;
+  }
+}
+
+async function triggerLoginSubmitAction(button, fallbackField) {
+  const form = button?.form || fallbackField?.form || button?.closest?.('form') || fallbackField?.closest?.('form') || null;
+
+  await humanPause(400, 1100);
+  if (button && isActionEnabled(button)) {
+    simulateClick(button);
+    return;
+  }
+
+  if (form && typeof form.requestSubmit === 'function') {
+    if (button && button.form === form) {
+      form.requestSubmit(button);
+    } else {
+      form.requestSubmit();
+    }
+    return;
+  }
+
+  if (button && typeof button.click === 'function') {
+    button.click();
+    return;
+  }
+
+  throw new Error('未找到可用的登录提交按钮。URL: ' + location.href);
+}
+
+function isSignupPasswordErrorPage() {
+  return Boolean(getSignupPasswordTimeoutErrorPageState());
 }
 
 function isSignupEmailAlreadyExistsPage() {
@@ -922,10 +1067,7 @@ async function fillVerificationCode(step, payload) {
   log(`步骤 ${step}：正在填写验证码：${code}`);
 
   if (step === 7) {
-    const prepareResult = await prepareLoginCodeFlow();
-    if (prepareResult?.restartFromStep6) {
-      return prepareResult;
-    }
+    await waitForLoginVerificationPageReady();
   }
 
   // Find code input — could be a single input or multiple separate inputs
@@ -986,63 +1128,344 @@ async function fillVerificationCode(step, payload) {
 // Step 6: Login with registered account (on OAuth auth page)
 // ============================================================
 
+async function waitForStep6EmailSubmitTransition(emailSubmittedAt, timeout = 12000) {
+  const start = Date.now();
+  let snapshot = inspectLoginAuthState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectLoginAuthState();
+
+    if (snapshot.state === 'verification_page') {
+      return {
+        action: 'done',
+        result: createStep6SuccessResult(snapshot, {
+          via: 'email_submit',
+          loginVerificationRequestedAt: emailSubmittedAt,
+        }),
+      };
+    }
+
+    if (snapshot.state === 'password_page') {
+      return { action: 'password', snapshot };
+    }
+
+    if (snapshot.state === 'login_timeout_error_page') {
+      return {
+        action: 'recoverable',
+        result: createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+          message: '提交邮箱后进入登录超时报错页。',
+        }),
+      };
+    }
+
+    if (snapshot.state === 'oauth_consent_page') {
+      throw new Error(`提交邮箱后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    if (snapshot.state === 'add_phone_page') {
+      throw new Error(`提交邮箱后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    await sleep(250);
+  }
+
+  snapshot = inspectLoginAuthState();
+  if (snapshot.state === 'verification_page') {
+    return {
+      action: 'done',
+      result: createStep6SuccessResult(snapshot, {
+        via: 'email_submit',
+        loginVerificationRequestedAt: emailSubmittedAt,
+      }),
+    };
+  }
+  if (snapshot.state === 'password_page') {
+    return { action: 'password', snapshot };
+  }
+  if (snapshot.state === 'login_timeout_error_page') {
+    return {
+      action: 'recoverable',
+      result: createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+        message: '提交邮箱后进入登录超时报错页。',
+      }),
+    };
+  }
+  if (snapshot.state === 'oauth_consent_page') {
+    throw new Error(`提交邮箱后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+  if (snapshot.state === 'add_phone_page') {
+    throw new Error(`提交邮箱后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+
+  return {
+    action: 'recoverable',
+    result: createStep6RecoverableResult('email_submit_stalled', snapshot, {
+      message: '提交邮箱后长时间未进入密码页或登录验证码页。',
+    }),
+  };
+}
+
+async function waitForStep6PasswordSubmitTransition(passwordSubmittedAt, timeout = 10000) {
+  const start = Date.now();
+  let snapshot = inspectLoginAuthState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectLoginAuthState();
+
+    if (snapshot.state === 'verification_page') {
+      return {
+        action: 'done',
+        result: createStep6SuccessResult(snapshot, {
+          via: 'password_submit',
+          loginVerificationRequestedAt: passwordSubmittedAt,
+        }),
+      };
+    }
+
+    if (snapshot.state === 'login_timeout_error_page') {
+      return {
+        action: 'recoverable',
+        result: createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+          message: '提交密码后进入登录超时报错页。',
+        }),
+      };
+    }
+
+    if (snapshot.state === 'oauth_consent_page') {
+      throw new Error(`提交密码后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    if (snapshot.state === 'add_phone_page') {
+      throw new Error(`提交密码后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    await sleep(250);
+  }
+
+  snapshot = inspectLoginAuthState();
+  if (snapshot.state === 'verification_page') {
+    return {
+      action: 'done',
+      result: createStep6SuccessResult(snapshot, {
+        via: 'password_submit',
+        loginVerificationRequestedAt: passwordSubmittedAt,
+      }),
+    };
+  }
+  if (snapshot.state === 'login_timeout_error_page') {
+    return {
+      action: 'recoverable',
+      result: createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+        message: '提交密码后进入登录超时报错页。',
+      }),
+    };
+  }
+  if (snapshot.state === 'oauth_consent_page') {
+    throw new Error(`提交密码后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+  if (snapshot.state === 'add_phone_page') {
+    throw new Error(`提交密码后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+  if (snapshot.state === 'password_page' && snapshot.switchTrigger) {
+    return { action: 'switch', snapshot };
+  }
+
+  return {
+    action: 'recoverable',
+    result: createStep6RecoverableResult('password_submit_stalled', snapshot, {
+      message: '提交密码后仍未进入登录验证码页。',
+    }),
+  };
+}
+
+async function waitForStep6SwitchTransition(loginVerificationRequestedAt, timeout = 10000) {
+  const start = Date.now();
+  let snapshot = inspectLoginAuthState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectLoginAuthState();
+
+    if (snapshot.state === 'verification_page') {
+      return createStep6SuccessResult(snapshot, {
+        via: 'switch_to_one_time_code_login',
+        loginVerificationRequestedAt,
+      });
+    }
+
+    if (snapshot.state === 'login_timeout_error_page') {
+      return createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+        message: '切换到一次性验证码登录后进入登录超时报错页。',
+      });
+    }
+
+    if (snapshot.state === 'oauth_consent_page') {
+      throw new Error(`切换到一次性验证码登录后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    if (snapshot.state === 'add_phone_page') {
+      throw new Error(`切换到一次性验证码登录后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+    }
+
+    await sleep(250);
+  }
+
+  snapshot = inspectLoginAuthState();
+  if (snapshot.state === 'verification_page') {
+    return createStep6SuccessResult(snapshot, {
+      via: 'switch_to_one_time_code_login',
+      loginVerificationRequestedAt,
+    });
+  }
+  if (snapshot.state === 'login_timeout_error_page') {
+    return createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+      message: '切换到一次性验证码登录后进入登录超时报错页。',
+    });
+  }
+  if (snapshot.state === 'oauth_consent_page') {
+    throw new Error(`切换到一次性验证码登录后页面直接进入 OAuth 授权页，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+  if (snapshot.state === 'add_phone_page') {
+    throw new Error(`切换到一次性验证码登录后页面直接进入手机号页面，未经过登录验证码页。URL: ${snapshot.url}`);
+  }
+
+  return createStep6RecoverableResult('one_time_code_switch_stalled', snapshot, {
+    message: '点击一次性验证码登录后仍未进入登录验证码页。',
+  });
+}
+
+async function step6SwitchToOneTimeCodeLogin(snapshot) {
+  const switchTrigger = snapshot?.switchTrigger || findOneTimeCodeLoginTrigger();
+  if (!switchTrigger || !isActionEnabled(switchTrigger)) {
+    return createStep6RecoverableResult('missing_one_time_code_trigger', inspectLoginAuthState(), {
+      message: '当前登录页没有可用的一次性验证码登录入口。',
+    });
+  }
+
+  log('步骤 6：已检测到一次性验证码登录入口，准备切换...');
+  const loginVerificationRequestedAt = Date.now();
+  await humanPause(350, 900);
+  simulateClick(switchTrigger);
+  log('步骤 6：已点击一次性验证码登录');
+  await sleep(1200);
+  return waitForStep6SwitchTransition(loginVerificationRequestedAt);
+}
+
+async function step6LoginFromPasswordPage(payload, snapshot) {
+  const currentSnapshot = snapshot || inspectLoginAuthState();
+
+  if (currentSnapshot.passwordInput) {
+    if (!payload.password) {
+      throw new Error('登录时缺少密码，步骤 6 无法继续。');
+    }
+
+    log('步骤 6：已进入密码页，准备填写密码...');
+    await humanPause(550, 1450);
+    fillInput(currentSnapshot.passwordInput, payload.password);
+    log('步骤 6：已填写密码');
+
+    await sleep(500);
+    const passwordSubmittedAt = Date.now();
+    await triggerLoginSubmitAction(currentSnapshot.submitButton, currentSnapshot.passwordInput);
+    log('步骤 6：已提交密码');
+
+    const transition = await waitForStep6PasswordSubmitTransition(passwordSubmittedAt);
+    if (transition.action === 'done') {
+      log('步骤 6：已进入登录验证码页面。', 'ok');
+      return transition.result;
+    }
+    if (transition.action === 'recoverable') {
+      log(`步骤 6：${transition.result.message || '提交密码后仍未进入登录验证码页面，准备重新执行步骤 6。'}`, 'warn');
+      return transition.result;
+    }
+    if (transition.action === 'switch') {
+      return step6SwitchToOneTimeCodeLogin(transition.snapshot);
+    }
+
+    return createStep6RecoverableResult('password_submit_unknown', inspectLoginAuthState(), {
+      message: '提交密码后未得到可用的下一步状态。',
+    });
+  }
+
+  if (currentSnapshot.switchTrigger) {
+    return step6SwitchToOneTimeCodeLogin(currentSnapshot);
+  }
+
+  return createStep6RecoverableResult('password_page_unactionable', currentSnapshot, {
+    message: '当前停留在登录页，但没有可提交密码的输入框，也没有一次性验证码登录入口。',
+  });
+}
+
+async function step6LoginFromEmailPage(payload, snapshot) {
+  const currentSnapshot = snapshot || inspectLoginAuthState();
+  const emailInput = currentSnapshot.emailInput || getLoginEmailInput();
+  if (!emailInput) {
+    throw new Error('在登录页未找到邮箱输入框。URL: ' + location.href);
+  }
+
+  if ((emailInput.value || '').trim() !== payload.email) {
+    await humanPause(500, 1400);
+    fillInput(emailInput, payload.email);
+    log('步骤 6：已填写邮箱');
+  } else {
+    log('步骤 6：邮箱已在输入框中，准备提交...');
+  }
+
+  await sleep(500);
+  const emailSubmittedAt = Date.now();
+  await triggerLoginSubmitAction(currentSnapshot.submitButton, emailInput);
+  log('步骤 6：已提交邮箱');
+
+  const transition = await waitForStep6EmailSubmitTransition(emailSubmittedAt);
+  if (transition.action === 'done') {
+    log('步骤 6：已进入登录验证码页面。', 'ok');
+    return transition.result;
+  }
+  if (transition.action === 'recoverable') {
+    log(`步骤 6：${transition.result.message || '提交邮箱后仍未进入目标页面，准备重新执行步骤 6。'}`, 'warn');
+    return transition.result;
+  }
+  if (transition.action === 'password') {
+    return step6LoginFromPasswordPage(payload, transition.snapshot);
+  }
+
+  return createStep6RecoverableResult('email_submit_unknown', inspectLoginAuthState(), {
+    message: '提交邮箱后未得到可用的下一步状态。',
+  });
+}
+
 async function step6_login(payload) {
-  const { email, password } = payload;
+  const { email } = payload;
   if (!email) throw new Error('登录时缺少邮箱地址。');
 
   log(`步骤 6：正在使用 ${email} 登录...`);
 
-  // Wait for email input on the auth page
-  let emailInput = null;
-  try {
-    emailInput = await waitForElement(
-      'input[type="email"], input[name="email"], input[name="username"], input[id*="email"], input[placeholder*="email" i], input[placeholder*="Email"]',
-      15000
-    );
-  } catch {
-    throw new Error('在登录页未找到邮箱输入框。URL: ' + location.href);
+  const snapshot = await waitForKnownLoginAuthState(15000);
+
+  if (snapshot.state === 'verification_page') {
+    log('步骤 6：登录验证码页面已就绪。', 'ok');
+    return createStep6SuccessResult(snapshot, { via: 'already_on_verification_page' });
   }
 
-  await humanPause(500, 1400);
-  fillInput(emailInput, email);
-  log('步骤 6：邮箱已填写');
-
-  // Submit email
-  await sleep(500);
-  const submitBtn1 = document.querySelector('button[type="submit"]')
-    || await waitForElementByText('button', /continue|next|submit|继续|下一步/i, 5000).catch(() => null);
-  if (submitBtn1) {
-    await humanPause(400, 1100);
-    simulateClick(submitBtn1);
-    log('步骤 6：邮箱已提交');
+  if (snapshot.state === 'login_timeout_error_page') {
+    log('步骤 6：检测到登录超时报错，准备重新执行步骤 6。', 'warn');
+    return createStep6RecoverableResult('login_timeout_error_page', snapshot, {
+      message: '当前页面处于登录超时报错页。',
+    });
   }
 
-  await sleep(2000);
-
-  // Check for password field
-  const passwordInput = document.querySelector('input[type="password"]');
-  if (passwordInput) {
-    log('步骤 6：已找到密码输入框，正在填写密码...');
-    await humanPause(550, 1450);
-    fillInput(passwordInput, password);
-
-    await sleep(500);
-    const submitBtn2 = document.querySelector('button[type="submit"]')
-      || await waitForElementByText('button', /continue|log\s*in|submit|sign\s*in|登录|继续/i, 5000).catch(() => null);
-    // Report complete BEFORE submit in case page navigates
-    reportComplete(6, { needsOTP: true });
-
-    if (submitBtn2) {
-      await humanPause(450, 1200);
-      simulateClick(submitBtn2);
-      log('步骤 6：密码已提交，可能还需要验证码（步骤 7）');
-    }
-    return;
+  if (snapshot.state === 'email_page') {
+    return step6LoginFromEmailPage(payload, snapshot);
   }
 
-  // No password field — OTP flow
-  log('步骤 6：未发现密码输入框，可能进入验证码流程或自动跳转。');
-  reportComplete(6, { needsOTP: true });
+  if (snapshot.state === 'password_page') {
+    return step6LoginFromPasswordPage(payload, snapshot);
+  }
+
+  throwForStep6FatalState(snapshot);
+  throw new Error(`无法识别当前登录页面状态。URL: ${snapshot?.url || location.href}`);
 }
 
 // ============================================================

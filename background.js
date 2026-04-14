@@ -2368,6 +2368,10 @@ function getContentScriptResponseTimeoutMs(message) {
     return 30000;
   }
 
+  if (message.type === 'EXECUTE_STEP' && Number(message.step) === 6) {
+    return 75000;
+  }
+
   if (message.type === 'POLL_EMAIL') {
     const maxAttempts = Math.max(1, Number(message.payload?.maxAttempts) || 1);
     const intervalMs = Math.max(0, Number(message.payload?.intervalMs) || 0);
@@ -2851,50 +2855,23 @@ function isVerificationMailPollingError(error) {
   return /未在 .*邮箱中找到新的匹配邮件|未在 Hotmail 收件箱中找到新的匹配验证码|邮箱轮询结束，但未获取到验证码|无法获取新的(?:注册|登录)验证码|页面未能重新就绪|页面通信异常|did not respond in \d+s/i.test(message);
 }
 
-const STEP7_RESTART_FROM_STEP6_ERROR_CODE = 'STEP7_RESTART_FROM_STEP6';
-const STEP7_RESTART_FROM_STEP6_MARKER_PATTERN = /^STEP7_RESTART_FROM_STEP6::([^:]+)::(.*)$/;
-
-function createStep7RestartFromStep6Error(details = {}) {
-  const { reason = 'unknown', url = '' } = details || {};
-  const reasonLabel = reason === 'login_timeout_error_page'
-    ? '检测到登录页超时报错'
-    : '步骤 7 请求回到步骤 6';
-  const error = new Error(`步骤 7：${reasonLabel}。${url ? `URL: ${url}` : ''}`.trim());
-  error.code = STEP7_RESTART_FROM_STEP6_ERROR_CODE;
-  error.restartReason = reason;
-  error.restartUrl = url;
-  return error;
-}
-
-function parseStep7RestartFromStep6Marker(message) {
-  const normalized = getErrorMessage(message);
-  const match = normalized.match(STEP7_RESTART_FROM_STEP6_MARKER_PATTERN);
-  if (!match) {
-    return null;
+function getLoginAuthStateLabel(state) {
+  switch (state) {
+    case 'verification_page':
+      return '登录验证码页';
+    case 'password_page':
+      return '密码页';
+    case 'email_page':
+      return '邮箱输入页';
+    case 'login_timeout_error_page':
+      return '登录超时报错页';
+    case 'oauth_consent_page':
+      return 'OAuth 授权页';
+    case 'add_phone_page':
+      return '手机号页';
+    default:
+      return '未知页面';
   }
-
-  return {
-    reason: match[1] || 'unknown',
-    url: match[2] || '',
-  };
-}
-
-function getStep7RestartFromStep6Error(result) {
-  if (result?.restartFromStep6) {
-    return createStep7RestartFromStep6Error(result);
-  }
-
-  const parsed = parseStep7RestartFromStep6Marker(result?.error);
-  if (!parsed) {
-    return null;
-  }
-
-  return createStep7RestartFromStep6Error(parsed);
-}
-
-function isStep7RestartFromStep6Error(error) {
-  return error?.code === STEP7_RESTART_FROM_STEP6_ERROR_CODE
-    || Boolean(parseStep7RestartFromStep6Marker(error));
 }
 
 function isRestartCurrentAttemptError(error) {
@@ -3886,8 +3863,8 @@ async function handleStepData(step, payload) {
 const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
-const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([4, 7, 8]);
-const STEP_COMPLETION_SIGNAL_STEPS = new Set([1, 2, 3, 5, 6, 9]);
+const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([4, 6, 7, 8]);
+const STEP_COMPLETION_SIGNAL_STEPS = new Set([1, 2, 3, 5, 9]);
 
 function waitForStepComplete(step, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -5710,15 +5687,13 @@ async function requestVerificationCodeResend(step) {
     payload: {},
   });
 
-  if (step === 7) {
-    const restartError = getStep7RestartFromStep6Error(result);
-    if (restartError) {
-      throw restartError;
-    }
-  }
-
   if (result && result.error) {
     throw new Error(result.error);
+  }
+
+  const requestedAt = Date.now();
+  if (step === 7) {
+    await setState({ loginVerificationRequestedAt: requestedAt });
   }
 
   const currentState = await getState();
@@ -5730,16 +5705,18 @@ async function requestVerificationCodeResend(step) {
     }
   }
 
-  return Date.now();
+  return requestedAt;
 }
 
 async function pollFreshVerificationCode(step, state, mail, pollOverrides = {}) {
+  const { onResendRequestedAt, ...cleanPollOverrides } = pollOverrides;
+
   if (mail.provider === HOTMAIL_PROVIDER) {
     const hotmailPollConfig = getHotmailVerificationPollConfig(step);
     return pollHotmailVerificationCode(step, state, {
       ...getVerificationPollPayload(step, state),
       ...hotmailPollConfig,
-      ...pollOverrides,
+      ...cleanPollOverrides,
     });
   }
   if (mail.provider === CLOUDFLARE_TEMP_EMAIL_PROVIDER) {
@@ -5763,17 +5740,23 @@ async function pollFreshVerificationCode(step, state, mail, pollOverrides = {}) 
   }
 
   let lastError = null;
-  const filterAfterTimestamp = pollOverrides.filterAfterTimestamp ?? getVerificationPollPayload(step, state).filterAfterTimestamp;
+  let filterAfterTimestamp = cleanPollOverrides.filterAfterTimestamp ?? getVerificationPollPayload(step, state).filterAfterTimestamp;
   const maxRounds = pollOverrides.maxRounds || VERIFICATION_POLL_MAX_ROUNDS;
 
   for (let round = 1; round <= maxRounds; round++) {
     throwIfStopped();
     if (round > 1) {
-      await requestVerificationCodeResend(step);
+      const requestedAt = await requestVerificationCodeResend(step);
+      if (typeof onResendRequestedAt === 'function') {
+        const nextFilterAfterTimestamp = await onResendRequestedAt(requestedAt);
+        if (nextFilterAfterTimestamp !== undefined) {
+          filterAfterTimestamp = nextFilterAfterTimestamp;
+        }
+      }
     }
 
     const payload = getVerificationPollPayload(step, state, {
-      ...pollOverrides,
+      ...cleanPollOverrides,
       filterAfterTimestamp,
       excludeCodes: [...rejectedCodes],
     });
@@ -5835,10 +5818,14 @@ async function pollFreshVerificationCodeWithResendInterval(step, state, mail, po
     maxRounds: _ignoredMaxRounds,
     resendIntervalMs: _ignoredResendIntervalMs,
     lastResendAt: _ignoredLastResendAt,
+    onResendRequestedAt: _ignoredOnResendRequestedAt,
     ...payloadOverrides
   } = pollOverrides;
+  const onResendRequestedAt = typeof pollOverrides.onResendRequestedAt === 'function'
+    ? pollOverrides.onResendRequestedAt
+    : null;
   let lastError = null;
-  const filterAfterTimestamp = payloadOverrides.filterAfterTimestamp ?? getVerificationPollPayload(step, state).filterAfterTimestamp;
+  let filterAfterTimestamp = payloadOverrides.filterAfterTimestamp ?? getVerificationPollPayload(step, state).filterAfterTimestamp;
   const maxRounds = pollOverrides.maxRounds || VERIFICATION_POLL_MAX_ROUNDS;
   const resendIntervalMs = Math.max(0, Number(pollOverrides.resendIntervalMs) || 0);
   let lastResendAt = Number(pollOverrides.lastResendAt) || 0;
@@ -5847,6 +5834,12 @@ async function pollFreshVerificationCodeWithResendInterval(step, state, mail, po
     throwIfStopped();
     if (round > 1) {
       lastResendAt = await requestVerificationCodeResend(step);
+      if (onResendRequestedAt) {
+        const nextFilterAfterTimestamp = await onResendRequestedAt(lastResendAt);
+        if (nextFilterAfterTimestamp !== undefined) {
+          filterAfterTimestamp = nextFilterAfterTimestamp;
+        }
+      }
     }
 
     while (true) {
@@ -5938,13 +5931,6 @@ async function submitVerificationCode(step, code) {
     payload: { code },
   });
 
-  if (step === 7) {
-    const restartError = getStep7RestartFromStep6Error(result);
-    if (restartError) {
-      throw restartError;
-    }
-  }
-
   if (result && result.error) {
     throw new Error(result.error);
   }
@@ -5963,7 +5949,7 @@ async function resolveVerificationStep(step, state, mail, options = {}) {
     rejectedCodes.add(state[stateKey]);
   }
 
-  const nextFilterAfterTimestamp = options.filterAfterTimestamp ?? null;
+  let nextFilterAfterTimestamp = options.filterAfterTimestamp ?? null;
   const requestFreshCodeFirst = options.requestFreshCodeFirst !== undefined
     ? Boolean(options.requestFreshCodeFirst)
     : (hotmailPollConfig?.requestFreshCodeFirst ?? false);
@@ -5971,12 +5957,30 @@ async function resolveVerificationStep(step, state, mail, options = {}) {
   const resendIntervalMs = Math.max(0, Number(options.resendIntervalMs) || 0);
   let lastResendAt = Number(options.lastResendAt) || 0;
 
+  const updateFilterAfterTimestampForStep7 = async (requestedAt) => {
+    if (step !== 7 || !requestedAt) {
+      return nextFilterAfterTimestamp;
+    }
+
+    if (mail.provider === HOTMAIL_PROVIDER) {
+      nextFilterAfterTimestamp = getHotmailVerificationRequestTimestamp(7, {
+        ...state,
+        loginVerificationRequestedAt: requestedAt,
+      });
+    } else {
+      nextFilterAfterTimestamp = Math.max(0, Number(requestedAt) - 60000);
+    }
+
+    return nextFilterAfterTimestamp;
+  };
+
   if (requestFreshCodeFirst) {
     try {
       lastResendAt = await requestVerificationCodeResend(step);
+      await updateFilterAfterTimestampForStep7(lastResendAt);
       await addLog(`步骤 ${step}：已先请求一封新的${getVerificationCodeLabel(step)}验证码，再开始轮询邮箱。`, 'warn');
     } catch (err) {
-      if (isStopError(err) || (step === 7 && isStep7RestartFromStep6Error(err))) {
+      if (isStopError(err)) {
         throw err;
       }
       await addLog(`步骤 ${step}：首次重新获取验证码失败：${err.message}，将继续使用当前时间窗口轮询。`, 'warn');
@@ -5997,6 +6001,7 @@ async function resolveVerificationStep(step, state, mail, options = {}) {
       filterAfterTimestamp: nextFilterAfterTimestamp ?? undefined,
       resendIntervalMs,
       lastResendAt,
+      onResendRequestedAt: updateFilterAfterTimestampForStep7,
     });
     lastResendAt = Number(result?.lastResendAt) || lastResendAt;
 
@@ -6025,6 +6030,7 @@ async function resolveVerificationStep(step, state, mail, options = {}) {
       }
 
       lastResendAt = await requestVerificationCodeResend(step);
+      await updateFilterAfterTimestampForStep7(lastResendAt);
       await addLog(`步骤 ${step}：提交失败后已请求新验证码（${attempt + 1}/${maxSubmitAttempts}）...`, 'warn');
       continue;
     }
@@ -6071,9 +6077,6 @@ async function executeStep4(state) {
 
   if (prepareResult && prepareResult.error) {
     throw new Error(prepareResult.error);
-  }
-  if (prepareResult?.verificationRequestedAt) {
-    await setState({ loginVerificationRequestedAt: prepareResult.verificationRequestedAt });
   }
   if (prepareResult?.alreadyVerified) {
     await completeStepFromBackground(4, {});
@@ -6138,7 +6141,7 @@ async function executeStep5(state) {
 }
 
 // ============================================================
-// Step 6: Login ChatGPT (Background opens tab, chatgpt.js handles login)
+// Step 6: Login and ensure the auth page reaches the login verification page
 // ============================================================
 
 async function refreshOAuthUrlBeforeStep6(state) {
@@ -6159,28 +6162,110 @@ async function refreshOAuthUrlBeforeStep6(state) {
   return latestState.oauthUrl;
 }
 
+function isStep6SuccessResult(result) {
+  return result?.step6Outcome === 'success';
+}
+
+function isStep6RecoverableResult(result) {
+  return result?.step6Outcome === 'recoverable';
+}
+
+async function getLoginAuthStateFromContent() {
+  const result = await sendToContentScriptResilient(
+    'signup-page',
+    {
+      type: 'GET_LOGIN_AUTH_STATE',
+      source: 'background',
+      payload: {},
+    },
+    {
+      timeoutMs: 15000,
+      retryDelayMs: 600,
+      logMessage: '步骤 7：认证页正在切换，等待页面重新就绪后继续确认验证码页状态...',
+    }
+  );
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result || {};
+}
+
+async function ensureStep7VerificationPageReady() {
+  const pageState = await getLoginAuthStateFromContent();
+  if (pageState.state === 'verification_page') {
+    return pageState;
+  }
+
+  const stateLabel = getLoginAuthStateLabel(pageState.state);
+  const urlPart = pageState.url ? ` URL: ${pageState.url}` : '';
+  throw new Error(`当前未进入登录验证码页面，请先重新完成步骤 6。当前状态：${stateLabel}.${urlPart}`.trim());
+}
+
 async function executeStep6(state) {
   if (!state.email) {
     throw new Error('缺少邮箱地址，请先完成步骤 3。');
   }
+  let attempt = 0;
 
-  const oauthUrl = await refreshOAuthUrlBeforeStep6(state);
+  while (true) {
+    throwIfStopped();
+    attempt += 1;
+    const currentState = attempt === 1 ? state : await getState();
+    const password = currentState.password || currentState.customPassword || '';
+    const oauthUrl = await refreshOAuthUrlBeforeStep6(currentState);
 
-  await addLog('步骤 6：正在打开最新 OAuth 链接并登录...');
-  // Reuse the signup-page tab — navigate it to the OAuth URL
-  await reuseOrCreateTab('signup-page', oauthUrl);
+    if (attempt === 1) {
+      await addLog('步骤 6：正在打开最新 OAuth 链接并登录...');
+    } else {
+      await addLog(`步骤 6：上一轮登录未进入验证码页，正在重新发起第 ${attempt} 轮登录尝试...`, 'warn');
+    }
 
-  // signup-page.js will inject (same auth.openai.com domain) and handle login
-  await sendToContentScript('signup-page', {
-    type: 'EXECUTE_STEP',
-    step: 6,
-    source: 'background',
-    payload: { email: state.email, password: state.password },
-  });
+    await reuseOrCreateTab('signup-page', oauthUrl);
+
+    const result = await sendToContentScriptResilient(
+      'signup-page',
+      {
+        type: 'EXECUTE_STEP',
+        step: 6,
+        source: 'background',
+        payload: {
+          email: currentState.email,
+          password,
+        },
+      },
+      {
+        timeoutMs: 180000,
+        retryDelayMs: 700,
+        logMessage: '步骤 6：认证页正在切换，等待页面重新就绪后继续登录...',
+      }
+    );
+
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+
+    if (isStep6SuccessResult(result)) {
+      await completeStepFromBackground(6, {
+        loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
+      });
+      return;
+    }
+
+    if (isStep6RecoverableResult(result)) {
+      const reasonMessage = result.message
+        || `当前停留在${getLoginAuthStateLabel(result.state)}，准备重新执行步骤 6。`;
+      await addLog(`步骤 6：${reasonMessage}`, 'warn');
+      continue;
+    }
+
+    throw new Error('步骤 6：认证页未返回可识别的登录结果。');
+  }
 }
 
 // ============================================================
-// Step 7: Get Login Verification Code (qq-mail.js polls, then fills in chatgpt.js)
+// Step 7: Poll login verification mail and submit the login code
 // ============================================================
 
 async function runStep7Attempt(state) {
@@ -6199,22 +6284,8 @@ async function runStep7Attempt(state) {
   }
 
   throwIfStopped();
-  await addLog('步骤 7：正在准备认证页，必要时切换到一次性验证码登录...');
-  const prepareResult = await sendToContentScript('signup-page', {
-    type: 'PREPARE_LOGIN_CODE',
-    step: 7,
-    source: 'background',
-    payload: {},
-  });
-
-  const restartError = getStep7RestartFromStep6Error(prepareResult);
-  if (restartError) {
-    throw restartError;
-  }
-
-  if (prepareResult && prepareResult.error) {
-    throw new Error(prepareResult.error);
-  }
+  await ensureStep7VerificationPageReady();
+  await addLog('步骤 7：登录验证码页面已就绪，开始获取验证码。', 'info');
 
   if (shouldUseCustomRegistrationEmail(state)) {
     await confirmCustomVerificationStepBypass(7);
@@ -6247,18 +6318,16 @@ async function runStep7Attempt(state) {
   }
 
   await resolveVerificationStep(7, state, mail, {
-    filterAfterTimestamp: mail.provider === HOTMAIL_PROVIDER ? undefined : stepStartedAt,
-    requestFreshCodeFirst: mail.provider === HOTMAIL_PROVIDER ? false : true,
+    filterAfterTimestamp: mail.provider === HOTMAIL_PROVIDER ? undefined : Math.max(0, stepStartedAt - 60000),
+    requestFreshCodeFirst: false,
     resendIntervalMs: mail.provider === HOTMAIL_PROVIDER ? 0 : STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
   });
 }
 
 async function rerunStep6ForStep7Recovery() {
   const currentState = await getState();
-  const waitForStep6 = waitForStepComplete(6, 120000);
   await addLog('步骤 7：正在回到步骤 6，重新发起登录验证码流程...', 'warn');
   await executeStep6(currentState);
-  await waitForStep6;
   await sleepWithStop(3000);
 }
 
@@ -6272,13 +6341,6 @@ async function executeStep7(state) {
       await runStep7Attempt(currentState);
       return;
     } catch (err) {
-      if (isStep7RestartFromStep6Error(err)) {
-        await addLog('步骤 7：检测到登录页超时报错，准备从步骤 6 重新开始...', 'warn');
-        await rerunStep6ForStep7Recovery();
-        currentState = await getState();
-        continue;
-      }
-
       if (!isVerificationMailPollingError(err)) {
         throw err;
       }
