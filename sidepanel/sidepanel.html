@@ -159,6 +159,7 @@
             <option value="qq">QQ 邮箱 (wx.mail.qq.com)</option>
             <option value="inbucket">Inbucket（自定义主机）</option>
             <option value="2925">2925 邮箱 (2925.com)</option>
+            <option value="cloudflare-temp-email">Cloudflare Temp Email</option>
           </select>
           <button id="btn-mail-login" class="btn btn-outline btn-sm data-inline-btn" type="button" disabled>登录</button>
         </div>
@@ -175,7 +176,29 @@
         <select id="select-email-generator" class="data-select">
           <option value="duck">DuckDuckGo</option>
           <option value="cloudflare">Cloudflare</option>
+          <option value="cloudflare-temp-email">Cloudflare Temp Email</option>
         </select>
+      </div>
+      <div class="data-row" id="row-temp-email-base-url" style="display:none;">
+        <span class="data-label">Temp API</span>
+        <input type="text" id="input-temp-email-base-url" class="data-input" placeholder="https://your-worker-domain" />
+      </div>
+      <div class="data-row" id="row-temp-email-admin-auth" style="display:none;">
+        <span class="data-label">Admin Auth</span>
+        <input type="password" id="input-temp-email-admin-auth" class="data-input data-input-with-icon" placeholder="Cloudflare Temp Email admin password" />
+      </div>
+      <div class="data-row" id="row-temp-email-custom-auth" style="display:none;">
+        <span class="data-label">Custom Auth</span>
+        <input type="password" id="input-temp-email-custom-auth" class="data-input data-input-with-icon" placeholder="仅当站点启用了访问密码时再填写；这是额外鉴权，不替代 Admin Auth。" />
+      </div>
+      <div class="data-row" id="row-temp-email-domain" style="display:none;">
+        <span class="data-label">Temp 域名</span>
+        <div class="data-inline">
+          <select id="select-temp-email-domain" class="data-select"></select>
+          <input type="text" id="input-temp-email-domain" class="data-input" placeholder="例如 mail.example.com"
+            style="display:none;" />
+          <button id="btn-temp-email-domain-mode" class="btn btn-outline btn-sm" type="button">添加</button>
+        </div>
       </div>
       <div class="data-row" id="row-cf-domain" style="display:none;">
         <span class="data-label">CF 域名</span>

@@ -57,10 +57,11 @@ async function testPollFreshVerificationCodeRethrowsStop() {
     extractFunction('pollFreshVerificationCode'),
   ].join('\n');
 
-  const api = new Function(`
+const api = new Function(`
 let stopRequested = false;
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 const HOTMAIL_PROVIDER = 'hotmail-api';
+const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const VERIFICATION_POLL_MAX_ROUNDS = 5;
 const logs = [];
 let resendCalls = 0;
@@ -119,9 +120,10 @@ async function testResolveVerificationStepRethrowsStopFromFreshRequest() {
     extractFunction('resolveVerificationStep'),
   ].join('\n');
 
-  const api = new Function(`
+const api = new Function(`
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 const HOTMAIL_PROVIDER = 'hotmail-api';
+const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const logs = [];
 let pollCalls = 0;
 

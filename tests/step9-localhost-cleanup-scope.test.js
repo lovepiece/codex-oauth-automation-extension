@@ -52,7 +52,12 @@ function extractFunction(name) {
 
 const bundle = [
   extractFunction('getTabRegistry'),
+  extractFunction('normalizeEmailGenerator'),
   extractFunction('parseUrlSafely'),
+  extractFunction('isHotmailProvider'),
+  extractFunction('isCustomMailProvider'),
+  extractFunction('isGeneratedAliasProvider'),
+  extractFunction('shouldUseCustomRegistrationEmail'),
   extractFunction('isLocalhostOAuthCallbackUrl'),
   extractFunction('isLocalhostOAuthCallbackTabMatch'),
   extractFunction('closeLocalhostCallbackTabs'),
@@ -62,6 +67,9 @@ const bundle = [
 ].join('\n');
 
 const api = new Function(`
+const HOTMAIL_PROVIDER = 'hotmail-api';
+const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
+const CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email';
 let currentState = {
   tabRegistry: {
     'signup-page': { tabId: 1, ready: true },

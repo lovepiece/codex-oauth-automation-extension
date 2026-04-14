@@ -60,11 +60,20 @@ const bundle = [
   extractFunction('hasSavedProgress'),
   extractFunction('getRunningSteps'),
   extractFunction('getAutoRunStatusPayload'),
+  extractFunction('createAutoRunRoundSummary'),
+  extractFunction('normalizeAutoRunRoundSummary'),
+  extractFunction('buildAutoRunRoundSummaries'),
+  extractFunction('serializeAutoRunRoundSummaries'),
+  extractFunction('getAutoRunRoundRetryCount'),
+  extractFunction('formatAutoRunFailureReasons'),
+  extractFunction('logAutoRunFinalSummary'),
+  extractFunction('waitBetweenAutoRunRounds'),
   extractFunction('autoRunLoop'),
 ].join('\n');
 
 const api = new Function(`
 const STOP_ERROR_MESSAGE = 'Flow stopped.';
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 3;
 const DEFAULT_STATE = {
   stepStatuses: {
     1: 'pending',
