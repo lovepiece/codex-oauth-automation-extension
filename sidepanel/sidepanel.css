@@ -915,12 +915,26 @@ header {
 
 .fallback-inline {
   justify-content: space-between;
+  align-items: center;
 }
 
 .fallback-thread-interval {
+  margin-left: auto;
+}
+
+.timing-field {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.timing-field-labeled {
+  min-width: 196px;
+  justify-content: flex-end;
+}
+
+.timing-field-right {
   margin-left: auto;
 }
 
@@ -983,6 +997,7 @@ header {
 
 .auto-delay-inline {
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   flex-wrap: nowrap;
 }
@@ -991,13 +1006,12 @@ header {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
 .auto-delay-side-right {
-  margin-left: auto;
-  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .auto-delay-check {
@@ -1015,6 +1029,8 @@ header {
   color: var(--text-muted);
   flex: 0 0 auto;
   white-space: nowrap;
+  min-width: 56px;
+  text-align: right;
 }
 
 .auto-delay-controls {
@@ -1035,6 +1051,8 @@ header {
   font-weight: 600;
   color: var(--text-muted);
   flex-shrink: 0;
+  min-width: 24px;
+  text-align: left;
 }
 
 /* Status Bar */
