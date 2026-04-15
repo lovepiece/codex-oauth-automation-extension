@@ -199,6 +199,7 @@ const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 15;
 const AUTO_RUN_FALLBACK_RISK_RECOMMENDED_THREAD_INTERVAL_MINUTES = 5;
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
+const GMAIL_PROVIDER = 'gmail';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
 const DEFAULT_LUCKMAIL_BASE_URL = 'https://mails.luckyous.com';
 const DEFAULT_LUCKMAIL_EMAIL_TYPE = 'ms_graph';
@@ -263,6 +264,11 @@ let luckmailRefreshQueued = false;
 
 btnAutoCancelSchedule?.remove();
 const MAIL_PROVIDER_LOGIN_CONFIGS = {
+  [GMAIL_PROVIDER]: {
+    label: 'Gmail 邮箱',
+    url: 'https://mail.google.com/mail/u/0/#inbox',
+    buttonLabel: '登录',
+  },
   '163': {
     label: '163 邮箱',
     url: 'https://mail.163.com/',
@@ -309,9 +315,33 @@ const LOG_LEVEL_LABELS = {
   error: '错误',
 };
 
-function usesGeneratedAliasMailProvider(provider) {
-  return String(provider || '').trim() === '2925'
-    && getSelectedMail2925Mode() === MAIL_2925_MODE_PROVIDE;
+function usesGeneratedAliasMailProvider(provider, mail2925Mode = getSelectedMail2925Mode()) {
+  const normalizedProvider = String(provider || '').trim().toLowerCase();
+  if (normalizedProvider === GMAIL_PROVIDER) {
+    return true;
+  }
+  return normalizedProvider === '2925'
+    && normalizeMail2925Mode(mail2925Mode) === MAIL_2925_MODE_PROVIDE;
+}
+
+function parseGmailBaseEmail(rawValue = '') {
+  const value = String(rawValue || '').trim().toLowerCase();
+  const match = value.match(/^([^@\s+]+)@((?:gmail|googlemail)\.com)$/i);
+  if (!match) return null;
+  return {
+    localPart: match[1],
+    domain: match[2].toLowerCase(),
+  };
+}
+
+function isManagedGmailAlias(value, baseEmail) {
+  const parsedBase = parseGmailBaseEmail(baseEmail);
+  if (!parsedBase) return false;
+
+  const match = String(value || '').trim().toLowerCase().match(/^([^@\s+]+)(?:\+[^@\s]+)?@((?:gmail|googlemail)\.com)$/i);
+  if (!match) return false;
+
+  return match[1] === parsedBase.localPart && match[2] === parsedBase.domain;
 }
 
 function showToast(message, type = 'error', duration = 4000) {
@@ -1413,7 +1443,7 @@ function applySettingsState(state) {
   inputSub2ApiPassword.value = state?.sub2apiPassword || '';
   inputSub2ApiGroup.value = state?.sub2apiGroupName || '';
   const restoredMailProvider = isCustomMailProvider(state?.mailProvider)
-    || ['hotmail-api', 'luckmail-api', '163', '163-vip', 'qq', 'inbucket', '2925', 'cloudflare-temp-email'].includes(String(state?.mailProvider || '').trim())
+    || ['hotmail-api', GMAIL_PROVIDER, 'luckmail-api', '163', '163-vip', 'qq', 'inbucket', '2925', 'cloudflare-temp-email'].includes(String(state?.mailProvider || '').trim())
     ? String(state?.mailProvider || '163').trim()
     : (String(state?.emailGenerator || '').trim().toLowerCase() === 'custom'
       || String(state?.emailGenerator || '').trim().toLowerCase() === 'manual'
@@ -2292,18 +2322,43 @@ function isCurrentEmailManagedByGeneratedAlias(
   mail2925Mode = latestState?.mail2925Mode
 ) {
   const normalizedProvider = String(provider || '').trim();
-  if (!(normalizedProvider === '2925' && normalizeMail2925Mode(mail2925Mode) === MAIL_2925_MODE_PROVIDE)) {
+  if (!usesGeneratedAliasMailProvider(normalizedProvider, mail2925Mode)) {
     return false;
   }
 
   const inputEmailValue = String(inputEmail.value || '').trim().toLowerCase();
   const stateEmailValue = String(state?.email || '').trim().toLowerCase();
 
+  if (normalizedProvider === GMAIL_PROVIDER) {
+    const baseEmail = String(state?.emailPrefix || inputEmailPrefix.value || '').trim();
+    return isManagedGmailAlias(inputEmailValue, baseEmail) || isManagedGmailAlias(stateEmailValue, baseEmail);
+  }
+
   if (normalizedProvider === '2925') {
     return inputEmailValue.endsWith('@2925.com') || stateEmailValue.endsWith('@2925.com');
   }
 
   return false;
+}
+
+async function maybeClearGeneratedAliasAfterEmailPrefixChange() {
+  const provider = selectMailProvider.value;
+  const mail2925Mode = latestState?.mail2925Mode;
+  if (!usesGeneratedAliasMailProvider(provider, mail2925Mode)) {
+    return;
+  }
+
+  const previousPrefix = String(latestState?.emailPrefix || '').trim();
+  const nextPrefix = inputEmailPrefix.value.trim();
+  if (previousPrefix === nextPrefix) {
+    return;
+  }
+
+  if (!isCurrentEmailManagedByGeneratedAlias(provider, latestState, mail2925Mode)) {
+    return;
+  }
+
+  await clearRegistrationEmail({ silent: true });
 }
 
 function updateMailLoginButtonState() {
@@ -2527,8 +2582,9 @@ function renderHotmailAccounts() {
 
 function updateMailProviderUI() {
   const use2925 = selectMailProvider.value === '2925';
+  const useGmail = selectMailProvider.value === GMAIL_PROVIDER;
   const mail2925Mode = getSelectedMail2925Mode();
-  const useGeneratedAlias = use2925 && mail2925Mode === MAIL_2925_MODE_PROVIDE;
+  const useGeneratedAlias = usesGeneratedAliasMailProvider(selectMailProvider.value, mail2925Mode);
   const useInbucket = selectMailProvider.value === 'inbucket';
   const useHotmail = selectMailProvider.value === 'hotmail-api';
   const useLuckmail = isLuckmailProvider();
@@ -2590,6 +2646,10 @@ function updateMailProviderUI() {
   labelEmailPrefix.textContent = '邮箱前缀';
   inputEmailPrefix.placeholder = '例如 abc';
   selectEmailGenerator.disabled = useHotmail || useLuckmail || useGeneratedAlias || useCustomEmail;
+  if (useGmail) {
+    labelEmailPrefix.textContent = 'Gmail 原邮箱';
+    inputEmailPrefix.placeholder = '例如 yourname@gmail.com';
+  }
   if (rowHotmailServiceMode) {
     rowHotmailServiceMode.style.display = useHotmail ? '' : 'none';
   }
@@ -2607,6 +2667,9 @@ function updateMailProviderUI() {
     : (useLuckmail
       ? '步骤 3 自动购买 LuckMail 邮箱并回填'
       : (useGeneratedAlias ? '步骤 3 自动生成 2925 邮箱并回填' : uiCopy.placeholder));
+  if (useGmail && useGeneratedAlias) {
+    inputEmail.placeholder = '步骤 3 自动生成 Gmail +tag 邮箱并回填';
+  }
   btnFetchEmail.disabled = useGeneratedAlias || useLuckmail || useCustomEmail || isAutoRunLockedPhase();
   if (!btnFetchEmail.disabled) {
     btnFetchEmail.textContent = uiCopy.buttonLabel;
@@ -2619,6 +2682,9 @@ function updateMailProviderUI() {
       : (useGeneratedAlias
         ? '步骤 3 会自动生成邮箱，无需手动获取'
         : (useCustomEmail ? '请先填写自定义注册邮箱，成功一轮后会自动清空' : `先自动获取${uiCopy.label}，或手动粘贴邮箱后再继续`)));
+  }
+  if (autoHintText && useGmail && useGeneratedAlias) {
+    autoHintText.textContent = '请先填写 Gmail 原邮箱，步骤 3 会自动生成 Gmail +tag 地址';
   }
   if (useHotmail) {
     inputEmail.value = getCurrentHotmailEmail();
@@ -3581,7 +3647,7 @@ document.querySelectorAll('.step-btn').forEach(btn => {
         } else if (usesGeneratedAliasMailProvider(selectMailProvider.value)) {
           const emailPrefix = inputEmailPrefix.value.trim();
           if (!emailPrefix) {
-            showToast('请先填写 2925 邮箱前缀。', 'warn');
+            showToast(selectMailProvider.value === GMAIL_PROVIDER ? '请先填写 Gmail 原邮箱。' : '请先填写 2925 邮箱前缀。', 'warn');
             return;
           }
           const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, emailPrefix } });
@@ -4345,8 +4411,7 @@ selectMailProvider.addEventListener('change', async () => {
   const leavingGeneratedAlias = (
     previousProvider !== nextProvider
     || (previousProvider === '2925' && normalizeMail2925Mode(previousMail2925Mode) !== getSelectedMail2925Mode())
-  ) && previousProvider === '2925'
-    && normalizeMail2925Mode(previousMail2925Mode) === MAIL_2925_MODE_PROVIDE
+  ) && usesGeneratedAliasMailProvider(previousProvider, previousMail2925Mode)
     && isCurrentEmailManagedByGeneratedAlias(previousProvider, latestState, previousMail2925Mode);
   if (leavingHotmail || leavingLuckmail || leavingGeneratedAlias) {
     await clearRegistrationEmail({ silent: true }).catch(() => { });
@@ -4513,10 +4578,12 @@ inputSub2ApiGroup.addEventListener('blur', () => {
 });
 
 inputEmailPrefix.addEventListener('input', () => {
+  maybeClearGeneratedAliasAfterEmailPrefixChange().catch(() => { });
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
 });
 inputEmailPrefix.addEventListener('blur', () => {
+  maybeClearGeneratedAliasAfterEmailPrefixChange().catch(() => {});
   saveSettings({ silent: true }).catch(() => {});
 });
 

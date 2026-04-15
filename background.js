@@ -92,6 +92,7 @@ const ICLOUD_LOGIN_URLS = [
   'https://www.icloud.com.cn/',
   'https://www.icloud.com/',
 ];
+const GMAIL_PROVIDER = 'gmail';
 const HOTMAIL_PROVIDER = 'hotmail-api';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
 const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
@@ -486,6 +487,7 @@ function normalizeMailProvider(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   switch (normalized) {
     case 'custom':
+    case GMAIL_PROVIDER:
     case HOTMAIL_PROVIDER:
     case LUCKMAIL_PROVIDER:
     case CLOUDFLARE_TEMP_EMAIL_PROVIDER:
@@ -1791,10 +1793,42 @@ function generateRandomSuffix(length = 6) {
   return suffix;
 }
 
+const GMAIL_ALIAS_WORDS = [
+  'amber', 'apple', 'ash', 'berry', 'birch', 'blue', 'brook', 'cedar',
+  'cloud', 'clover', 'coast', 'cocoa', 'coral', 'dawn', 'delta', 'echo',
+  'ember', 'field', 'flint', 'flora', 'forest', 'frost', 'glade', 'harbor',
+  'hazel', 'honey', 'ivory', 'jade', 'lake', 'leaf', 'light', 'lilac',
+  'lotus', 'lunar', 'maple', 'meadow', 'mist', 'moon', 'nova', 'oasis',
+  'olive', 'opal', 'pearl', 'pine', 'pixel', 'plum', 'quartz', 'rain',
+  'raven', 'river', 'rose', 'sage', 'shore', 'sky', 'solar', 'spark',
+  'stone', 'storm', 'sun', 'terra', 'vale', 'wave', 'willow', 'zephyr',
+];
+
+function generateRandomWordAliasTag(parts = 3) {
+  const selected = [];
+  for (let i = 0; i < parts; i++) {
+    selected.push(GMAIL_ALIAS_WORDS[Math.floor(Math.random() * GMAIL_ALIAS_WORDS.length)]);
+  }
+  return selected.join('');
+}
+
+function parseGmailBaseEmail(rawValue) {
+  const value = String(rawValue || '').trim().toLowerCase();
+  const match = value.match(/^([^@\s+]+)@((?:gmail|googlemail)\.com)$/i);
+  if (!match) return null;
+  return {
+    localPart: match[1],
+    domain: match[2].toLowerCase(),
+  };
+}
+
 function isGeneratedAliasProvider(stateOrProvider, mail2925Mode = undefined) {
   const provider = typeof stateOrProvider === 'string'
     ? stateOrProvider
     : stateOrProvider?.mailProvider;
+  if (provider === GMAIL_PROVIDER) {
+    return true;
+  }
   const resolvedMail2925Mode = mail2925Mode !== undefined
     ? normalizeMail2925Mode(mail2925Mode)
     : getMail2925Mode(stateOrProvider);
@@ -1811,6 +1845,17 @@ function shouldUseCustomRegistrationEmail(state = {}) {
 function buildGeneratedAliasEmail(state) {
   const provider = state.mailProvider || '163';
   const emailPrefix = (state.emailPrefix || '').trim();
+
+  if (provider === GMAIL_PROVIDER) {
+    if (!emailPrefix) {
+      throw new Error('Gmail 原邮箱未设置，请先在侧边栏填写。');
+    }
+    const parsed = parseGmailBaseEmail(emailPrefix);
+    if (!parsed) {
+      throw new Error('Gmail 原邮箱格式不正确，请填写类似 name@gmail.com 的地址。');
+    }
+    return `${parsed.localPart}+${generateRandomWordAliasTag()}@${parsed.domain}`;
+  }
 
   if (!emailPrefix) {
     throw new Error('2925 邮箱前缀未设置，请先在侧边栏填写。');
@@ -3151,6 +3196,8 @@ function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
       return candidate.hostname === 'mail.qq.com' || candidate.hostname === 'wx.mail.qq.com';
     case 'mail-163':
       return is163MailHost(candidate.hostname);
+    case 'gmail-mail':
+      return candidate.hostname === 'mail.google.com';
     case 'inbucket-mail':
       return Boolean(reference)
         && candidate.origin === reference.origin
@@ -3856,6 +3903,7 @@ function getStep8CallbackUrlFromTabUpdate(tabId, changeInfo, tab, signupTabId) {
 
 function getSourceLabel(source) {
   const labels = {
+    'gmail-mail': 'Gmail 邮箱',
     'sidepanel': '侧边栏',
     'signup-page': '认证页',
     'vps-panel': 'CPA 面板',
@@ -5606,6 +5654,13 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
   }
 
   if (isGeneratedAliasProvider(currentState)) {
+    if (currentState.mailProvider === GMAIL_PROVIDER) {
+      if (!currentState.emailPrefix) {
+        throw new Error('Gmail 原邮箱未设置，请先在侧边栏填写。');
+      }
+      await addLog(`=== 鐩爣 ${targetRun}/${totalRuns} 杞細Gmail +tag 妯″紡宸插惎鐢紝灏嗗湪姝ラ 3 鑷姩鐢熸垚閭锛堢 ${attemptRuns} 娆″皾璇曪級===`, 'info');
+      return null;
+    }
     if (!currentState.emailPrefix) {
       throw new Error('2925 邮箱前缀未设置，请先在侧边栏填写。');
     }
@@ -6530,6 +6585,15 @@ function getMailConfig(state) {
   }
   if (provider === HOTMAIL_PROVIDER) {
     return { provider: HOTMAIL_PROVIDER, label: 'Hotmail（API对接/本地助手）' };
+  }
+  if (provider === GMAIL_PROVIDER) {
+    return {
+      source: 'gmail-mail',
+      url: 'https://mail.google.com/mail/u/0/#inbox',
+      label: 'Gmail 邮箱',
+      inject: ['content/activation-utils.js', 'content/utils.js', 'content/gmail-mail.js'],
+      injectSource: 'gmail-mail',
+    };
   }
   if (provider === LUCKMAIL_PROVIDER) {
     return { provider: LUCKMAIL_PROVIDER, label: 'LuckMail（API 购邮）' };

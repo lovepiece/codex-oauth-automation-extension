@@ -9,6 +9,7 @@ const SCRIPT_SOURCE = (() => {
   if (url.includes('auth0.openai.com') || url.includes('auth.openai.com') || url.includes('accounts.openai.com')) return 'signup-page';
   if (hostname === 'mail.qq.com' || hostname === 'wx.mail.qq.com') return 'qq-mail';
   if (hostname === 'mail.163.com' || hostname.endsWith('.mail.163.com') || hostname === 'webmail.vip.163.com') return 'mail-163';
+  if (hostname === 'mail.google.com') return 'gmail-mail';
   if (url.includes('duckduckgo.com/email/settings/autofill')) return 'duck-mail';
   if (url.includes('chatgpt.com')) return 'chatgpt';
   if (url.includes("2925.com")) return "mail-2925";
@@ -405,7 +406,7 @@ async function humanPause(min = 250, max = 850) {
 
 // Auto-report ready on load
 // Skip ready signal from child iframes of mail pages to avoid overwriting the top frame's registration
-const _isMailChildFrame = (SCRIPT_SOURCE === 'qq-mail' || SCRIPT_SOURCE === 'mail-163' || SCRIPT_SOURCE === 'mail-2925' || SCRIPT_SOURCE === 'inbucket-mail') && window !== window.top;
+const _isMailChildFrame = (SCRIPT_SOURCE === 'qq-mail' || SCRIPT_SOURCE === 'mail-163' || SCRIPT_SOURCE === 'gmail-mail' || SCRIPT_SOURCE === 'mail-2925' || SCRIPT_SOURCE === 'inbucket-mail') && window !== window.top;
 if (!_isMailChildFrame) {
   reportReady();
 }
