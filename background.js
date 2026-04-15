@@ -200,6 +200,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailBaseUrl: '',
   cloudflareTempEmailAdminAuth: '',
   cloudflareTempEmailCustomAuth: '',
+  cloudflareTempEmailReceiveMailbox: '',
   cloudflareTempEmailDomain: '',
   cloudflareTempEmailDomains: [],
   hotmailAccounts: [],
@@ -648,9 +649,30 @@ function getCloudflareTempEmailConfig(state = {}) {
     baseUrl: normalizeCloudflareTempEmailBaseUrl(state.cloudflareTempEmailBaseUrl),
     adminAuth: String(state.cloudflareTempEmailAdminAuth || ''),
     customAuth: String(state.cloudflareTempEmailCustomAuth || ''),
+    receiveMailbox: normalizeCloudflareTempEmailReceiveMailbox(state.cloudflareTempEmailReceiveMailbox),
     domain: normalizeCloudflareTempEmailDomain(state.cloudflareTempEmailDomain),
     domains: normalizeCloudflareTempEmailDomains(state.cloudflareTempEmailDomains),
   };
+}
+
+function normalizeCloudflareTempEmailReceiveMailbox(value = '') {
+  const normalized = normalizeCloudflareTempEmailAddress(value);
+  if (!normalized) return '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : '';
+}
+
+function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {}, config = getCloudflareTempEmailConfig(state)) {
+  const configuredReceiveMailbox = normalizeCloudflareTempEmailReceiveMailbox(config.receiveMailbox);
+  if (configuredReceiveMailbox) {
+    return configuredReceiveMailbox;
+  }
+
+  const requestedTarget = normalizeCloudflareTempEmailReceiveMailbox(pollPayload.targetEmail);
+  if (requestedTarget) {
+    return requestedTarget;
+  }
+
+  return normalizeCloudflareTempEmailReceiveMailbox(state.email);
 }
 
 function normalizePersistentSettingValue(key, value) {
@@ -715,6 +737,8 @@ function normalizePersistentSettingValue(key, value) {
     case 'cloudflareTempEmailAdminAuth':
     case 'cloudflareTempEmailCustomAuth':
       return String(value || '');
+    case 'cloudflareTempEmailReceiveMailbox':
+      return normalizeCloudflareTempEmailReceiveMailbox(value);
     case 'cloudflareTempEmailDomain':
       return normalizeCloudflareTempEmailDomain(value);
     case 'cloudflareTempEmailDomains':
@@ -2629,12 +2653,18 @@ async function listCloudflareTempEmailMessages(state, options = {}) {
 }
 
 async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload = {}) {
-  const targetEmail = normalizeCloudflareTempEmailAddress(pollPayload.targetEmail || state.email);
+  const config = ensureCloudflareTempEmailConfig(state, { requireAdminAuth: true });
+  const targetEmail = resolveCloudflareTempEmailPollTargetEmail(state, pollPayload, config);
+  const registrationEmail = normalizeCloudflareTempEmailReceiveMailbox(state.email);
   if (!targetEmail) {
-    throw new Error('Cloudflare Temp Email 轮询前缺少目标邮箱地址。');
+    throw new Error('Cloudflare Temp Email 轮询前缺少目标邮箱地址，请先填写注册邮箱或“邮件接收”邮箱。');
   }
 
-  await addLog(`步骤 ${step}：正在轮询 Cloudflare Temp Email 邮件（${targetEmail}）...`, 'info');
+  if (registrationEmail && registrationEmail !== targetEmail) {
+    await addLog(`步骤 ${step}：正在轮询 Cloudflare Temp Email 收件邮箱（${targetEmail}），注册邮箱为 ${registrationEmail}...`, 'info');
+  } else {
+    await addLog(`步骤 ${step}：正在轮询 Cloudflare Temp Email 邮件（${targetEmail}）...`, 'info');
+  }
   const maxAttempts = Number(pollPayload.maxAttempts) || 5;
   const intervalMs = Number(pollPayload.intervalMs) || 3000;
   let lastError = null;
@@ -2642,7 +2672,7 @@ async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     throwIfStopped();
     try {
-      const { config, messages } = await listCloudflareTempEmailMessages(state, {
+      const { messages } = await listCloudflareTempEmailMessages(state, {
         address: targetEmail,
         limit: pollPayload.limit || CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE,
         offset: pollPayload.offset || 0,

@@ -51,31 +51,10 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
-test('pollCloudflareTempEmailVerificationCode returns code even if delete fails', async () => {
-  const bundle = [
-    extractFunction('isStopError'),
-    extractFunction('throwIfStopped'),
-    extractFunction('summarizeCloudflareTempEmailMessagesForLog'),
-    extractFunction('pollCloudflareTempEmailVerificationCode'),
-  ].join('\n');
-
-const api = new Function(`
-let stopRequested = false;
-const STOP_ERROR_MESSAGE = '流程已被用户停止。';
-const CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE = 20;
-const logs = [];
-function normalizeCloudflareTempEmailAddress(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-async function addLog(message, level) {
-  logs.push({ message, level });
-}
-async function sleepWithStop() {}
-async function listCloudflareTempEmailMessages() {
-  return {
-    config: {},
-    messages: [{
+function createProviderApi(options = {}) {
+  const {
+    receiveMailbox = '',
+    messages = [{
       id: 'mail-1',
       address: 'user@example.com',
       receivedDateTime: '2026-04-13T09:20:00.000Z',
@@ -83,21 +62,59 @@ async function listCloudflareTempEmailMessages() {
       from: { emailAddress: { address: 'noreply@tm.openai.com' } },
       bodyPreview: 'Your verification code is 123456.',
     }],
+    deleteShouldFail = false,
+  } = options;
+
+  const bundle = [
+    extractFunction('isStopError'),
+    extractFunction('throwIfStopped'),
+    extractFunction('normalizeCloudflareTempEmailReceiveMailbox'),
+    extractFunction('resolveCloudflareTempEmailPollTargetEmail'),
+    extractFunction('summarizeCloudflareTempEmailMessagesForLog'),
+    extractFunction('pollCloudflareTempEmailVerificationCode'),
+  ].join('\n');
+
+  return new Function('options', `
+let stopRequested = false;
+const STOP_ERROR_MESSAGE = '流程已被用户停止。';
+const CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE = 20;
+const logs = [];
+const listCalls = [];
+const messages = options.messages;
+function normalizeCloudflareTempEmailAddress(value) {
+  return String(value || '').trim().toLowerCase();
+}
+async function addLog(message, level) {
+  logs.push({ message, level });
+}
+async function sleepWithStop() {}
+function ensureCloudflareTempEmailConfig() {
+  return { receiveMailbox: options.receiveMailbox };
+}
+async function listCloudflareTempEmailMessages(_state, config) {
+  listCalls.push(config.address);
+  return {
+    config: {},
+    messages,
   };
 }
-function pickVerificationMessageWithTimeFallback(messages) {
+function pickVerificationMessageWithTimeFallback(currentMessages) {
   return {
-    match: {
-      code: '123456',
-      receivedAt: Date.parse(messages[0].receivedDateTime),
-      message: messages[0],
-    },
+    match: currentMessages[0]
+      ? {
+          code: String(currentMessages[0].bodyPreview).match(/(\\d{6})/)[1],
+          receivedAt: Date.parse(currentMessages[0].receivedDateTime),
+          message: currentMessages[0],
+        }
+      : null,
     usedRelaxedFilters: false,
     usedTimeFallback: false,
   };
 }
 async function deleteCloudflareTempEmailMail() {
-  throw new Error('delete failed');
+  if (options.deleteShouldFail) {
+    throw new Error('delete failed');
+  }
 }
 
 ${bundle}
@@ -105,10 +122,14 @@ ${bundle}
 return {
   pollCloudflareTempEmailVerificationCode,
   snapshot() {
-    return { logs };
+    return { logs, listCalls };
   },
 };
-`)();
+`)(options);
+}
+
+test('pollCloudflareTempEmailVerificationCode returns code even if delete fails', async () => {
+  const api = createProviderApi({ deleteShouldFail: true });
 
   const result = await api.pollCloudflareTempEmailVerificationCode(4, { email: 'user@example.com' }, {
     targetEmail: 'user@example.com',
@@ -119,42 +140,40 @@ return {
   assert.equal(result.code, '123456');
   const state = api.snapshot();
   assert.equal(state.logs.some((entry) => entry.message.includes('删除 Cloudflare Temp Email 邮件失败')), true);
+  assert.deepEqual(state.listCalls, ['user@example.com']);
 });
 
-test('pollCloudflareTempEmailVerificationCode requires target email', async () => {
-  const bundle = [
-    extractFunction('isStopError'),
-    extractFunction('throwIfStopped'),
-    extractFunction('pollCloudflareTempEmailVerificationCode'),
-  ].join('\n');
-
-  const api = new Function(`
-let stopRequested = false;
-const STOP_ERROR_MESSAGE = '流程已被用户停止。';
-const CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE = 20;
-function normalizeCloudflareTempEmailAddress(value) {
-  return String(value || '').trim().toLowerCase();
-}
-async function addLog() {}
-async function sleepWithStop() {}
-async function listCloudflareTempEmailMessages() {
-  throw new Error('should not reach list');
-}
-function pickVerificationMessageWithTimeFallback() {
-  return { match: null, usedRelaxedFilters: false, usedTimeFallback: false };
-}
-async function deleteCloudflareTempEmailMail() {}
-function summarizeCloudflareTempEmailMessagesForLog() {
-  return '';
-}
-
-${bundle}
-
-return { pollCloudflareTempEmailVerificationCode };
-`)();
+test('pollCloudflareTempEmailVerificationCode requires target email or receive mailbox', async () => {
+  const api = createProviderApi({ messages: [] });
 
   await assert.rejects(
     api.pollCloudflareTempEmailVerificationCode(4, {}, {}),
-    /缺少目标邮箱地址/
+    /目标邮箱地址|邮件接收邮箱/
   );
+});
+
+test('pollCloudflareTempEmailVerificationCode prefers configured receive mailbox over registration email', async () => {
+  const api = createProviderApi({
+    receiveMailbox: 'forward-box@email.20021108.xyz',
+    messages: [{
+      id: 'mail-2',
+      address: 'forward-box@email.20021108.xyz',
+      receivedDateTime: '2026-04-13T10:20:00.000Z',
+      subject: 'Login verification code',
+      from: { emailAddress: { address: 'noreply@tm.openai.com' } },
+      bodyPreview: 'Your verification code is 654321.',
+    }],
+  });
+
+  const result = await api.pollCloudflareTempEmailVerificationCode(4, {
+    email: 'duck-forwarded@duck.com',
+    cloudflareTempEmailReceiveMailbox: 'forward-box@email.20021108.xyz',
+  }, {
+    targetEmail: 'duck-forwarded@duck.com',
+    maxAttempts: 1,
+    intervalMs: 1,
+  });
+
+  assert.equal(result.code, '654321');
+  assert.deepEqual(api.snapshot().listCalls, ['forward-box@email.20021108.xyz']);
 });

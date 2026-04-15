@@ -78,6 +78,8 @@ const rowTempEmailAdminAuth = document.getElementById('row-temp-email-admin-auth
 const inputTempEmailAdminAuth = document.getElementById('input-temp-email-admin-auth');
 const rowTempEmailCustomAuth = document.getElementById('row-temp-email-custom-auth');
 const inputTempEmailCustomAuth = document.getElementById('input-temp-email-custom-auth');
+const rowTempEmailReceiveMailbox = document.getElementById('row-temp-email-receive-mailbox');
+const inputTempEmailReceiveMailbox = document.getElementById('input-temp-email-receive-mailbox');
 const rowTempEmailDomain = document.getElementById('row-temp-email-domain');
 const selectTempEmailDomain = document.getElementById('select-temp-email-domain');
 const inputTempEmailDomain = document.getElementById('input-temp-email-domain');
@@ -1004,6 +1006,12 @@ function normalizeCloudflareTempEmailBaseUrlValue(value = '') {
   }
 }
 
+function normalizeCloudflareTempEmailReceiveMailboxValue(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : '';
+}
+
 function normalizeCloudflareTempEmailDomainValue(value = '') {
   return normalizeCloudflareDomainValue(value);
 }
@@ -1162,6 +1170,7 @@ function collectSettingsPayload() {
     cloudflareTempEmailBaseUrl: normalizeCloudflareTempEmailBaseUrlValue(inputTempEmailBaseUrl.value),
     cloudflareTempEmailAdminAuth: inputTempEmailAdminAuth.value,
     cloudflareTempEmailCustomAuth: inputTempEmailCustomAuth.value,
+    cloudflareTempEmailReceiveMailbox: normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value),
     cloudflareTempEmailDomain: selectedCloudflareTempEmailDomain,
     cloudflareTempEmailDomains: tempEmailDomains,
     autoRunSkipFailures: inputAutoSkipFailures.checked,
@@ -1521,6 +1530,7 @@ function applySettingsState(state) {
   inputTempEmailBaseUrl.value = state?.cloudflareTempEmailBaseUrl || '';
   inputTempEmailAdminAuth.value = state?.cloudflareTempEmailAdminAuth || '';
   inputTempEmailCustomAuth.value = state?.cloudflareTempEmailCustomAuth || '';
+  inputTempEmailReceiveMailbox.value = state?.cloudflareTempEmailReceiveMailbox || '';
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
   renderCloudflareTempEmailDomainOptions(state?.cloudflareTempEmailDomain || '');
@@ -2656,6 +2666,7 @@ function updateMailProviderUI() {
   const useCloudflareTempEmailGenerator = selectedGenerator === 'cloudflare-temp-email';
   const showCloudflareDomain = useEmailGenerator && useCloudflare;
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
+  const showCloudflareTempEmailReceiveMailbox = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
   const showCloudflareTempEmailDomain = useEmailGenerator && useCloudflareTempEmailGenerator;
   if (rowEmailGenerator) {
     rowEmailGenerator.style.display = useEmailGenerator ? '' : 'none';
@@ -2680,6 +2691,7 @@ function updateMailProviderUI() {
   rowTempEmailBaseUrl.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailAdminAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailCustomAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
+  rowTempEmailReceiveMailbox.style.display = showCloudflareTempEmailReceiveMailbox ? '' : 'none';
   rowTempEmailDomain.style.display = showCloudflareTempEmailDomain ? '' : 'none';
   const { domains: tempEmailDomains } = getCloudflareTempEmailDomainsFromState();
   if (showCloudflareTempEmailDomain) {
@@ -2736,6 +2748,9 @@ function updateMailProviderUI() {
   }
   if (autoHintText && useGmail && useGeneratedAlias) {
     autoHintText.textContent = '请先填写 Gmail 原邮箱，步骤 3 会自动生成 Gmail +tag 地址';
+  }
+  if (autoHintText && showCloudflareTempEmailReceiveMailbox) {
+    autoHintText.textContent = '若注册邮箱会转发到 Cloudflare Temp Email，请在“邮件接收”中填写实际接收转发邮件的邮箱。';
   }
   if (useHotmail) {
     inputEmail.value = getCurrentHotmailEmail();
@@ -4717,6 +4732,15 @@ inputTempEmailCustomAuth.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputTempEmailReceiveMailbox.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputTempEmailReceiveMailbox.addEventListener('blur', () => {
+  inputTempEmailReceiveMailbox.value = normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputAutoSkipFailuresThreadIntervalMinutes.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -4888,6 +4912,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.cloudflareTempEmailCustomAuth !== undefined) {
         inputTempEmailCustomAuth.value = message.payload.cloudflareTempEmailCustomAuth || '';
+      }
+      if (message.payload.cloudflareTempEmailReceiveMailbox !== undefined) {
+        inputTempEmailReceiveMailbox.value = message.payload.cloudflareTempEmailReceiveMailbox || '';
       }
       if (message.payload.cloudflareTempEmailDomain !== undefined || message.payload.cloudflareTempEmailDomains !== undefined) {
         renderCloudflareTempEmailDomainOptions(message.payload.cloudflareTempEmailDomain || latestState?.cloudflareTempEmailDomain || '');

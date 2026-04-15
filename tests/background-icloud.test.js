@@ -113,6 +113,13 @@ function normalizeCloudflareDomain(value = '') {
 function normalizeCloudflareDomains(values = []) {
   return Array.isArray(values) ? values : [];
 }
+function normalizeCloudflareTempEmailAddress(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+function normalizeCloudflareTempEmailReceiveMailbox(value = '') {
+  const normalized = normalizeCloudflareTempEmailAddress(value);
+  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalized) ? normalized : '';
+}
 function normalizeHotmailAccounts(values = []) {
   return Array.isArray(values) ? values : [];
 }
@@ -168,6 +175,7 @@ test('normalizePersistentSettingValue handles icloud settings', () => {
   assert.equal(api.normalizePersistentSettingValue('icloudHostPreference', 'icloud.com'), 'icloud.com');
   assert.equal(api.normalizePersistentSettingValue('icloudHostPreference', 'bad-host'), 'auto');
   assert.equal(api.normalizePersistentSettingValue('autoDeleteUsedIcloudAlias', 1), true);
+  assert.equal(api.normalizePersistentSettingValue('cloudflareTempEmailReceiveMailbox', ' Forward@Example.com '), 'forward@example.com');
 });
 
 test('finalizeIcloudAliasAfterSuccessfulFlow marks icloud aliases as used without deleting when auto-delete is off', async () => {
