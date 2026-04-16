@@ -2018,8 +2018,23 @@ async function step5_fillNameBirthday(payload) {
     throw new Error('未找到“完成帐户创建”按钮。URL: ' + location.href);
   }
 
+  const isAgeMode = !birthdayMode && Boolean(ageInput);
+  if (isAgeMode) {
+    log('步骤 5：当前为年龄输入模式，点击“继续”后将直接视为完成并进入步骤 6。', 'warn');
+    reportComplete(5, {
+      skippedPostSubmitCheck: true,
+      directProceedToStep6: true,
+    });
+  }
+
   await humanPause(500, 1300);
   simulateClick(completeBtn);
+
+  if (isAgeMode) {
+    log('步骤 5：年龄模式已点击“继续”，已跳过后续结果等待。', 'warn');
+    return;
+  }
+
   log('步骤 5：已点击“完成帐户创建”，正在等待页面结果...');
 
   const outcome = await waitForStep5SubmitOutcome();
