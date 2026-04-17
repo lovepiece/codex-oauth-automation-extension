@@ -840,6 +840,11 @@ const PHONE_NUMBER_INPUT_SELECTOR = [
   'input[name*="phone" i]',
   'input[id*="phone" i]',
 ].join(', ');
+const FIXED_PHONE_COUNTRY_FALLBACK = {
+  key: 'TH',
+  dialCode: '66',
+  name: '泰国',
+};
 
 function getPhoneNumberInput() {
   const candidates = Array.from(document.querySelectorAll(PHONE_NUMBER_INPUT_SELECTOR));
@@ -872,6 +877,18 @@ function getPhoneDigits(phoneNumber = '') {
   return String(phoneNumber || '').replace(/\D/g, '');
 }
 
+function buildFixedPhoneCountryFallbackValue(phoneNumber = '', country = FIXED_PHONE_COUNTRY_FALLBACK) {
+  const rawValue = String(phoneNumber || '').trim();
+  const digits = getPhoneDigits(rawValue);
+  const dialCode = String(country?.dialCode || FIXED_PHONE_COUNTRY_FALLBACK.dialCode || '').replace(/\D/g, '') || '66';
+  if (!digits) {
+    return rawValue;
+  }
+
+  const normalizedDigits = digits.startsWith(dialCode) ? digits : `${dialCode}${digits}`;
+  return `+${normalizedDigits}`;
+}
+
 function getPhoneCountryOptionDialCode(option) {
   if (!option) {
     return '';
@@ -880,6 +897,26 @@ function getPhoneCountryOptionDialCode(option) {
   const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
   const match = text.match(/\+(\d{1,4})/);
   return match ? match[1] : '';
+}
+
+function getPhoneCountryOptionMatchText(option) {
+  if (!option) {
+    return '';
+  }
+
+  const fragments = [
+    getActionText(option) || '',
+    option.textContent || '',
+    option.getAttribute?.('aria-label') || '',
+    option.getAttribute?.('data-key') || '',
+  ];
+
+  const imageNodes = option.querySelectorAll?.('img[alt]') || [];
+  for (const imageNode of Array.from(imageNodes)) {
+    fragments.push(imageNode.getAttribute?.('alt') || imageNode.alt || '');
+  }
+
+  return normalizePhoneCountryMatchText(fragments.join(' '));
 }
 
 function getPhoneCountryOptionKey(option) {
@@ -1023,7 +1060,7 @@ function findPhoneCountryOptionByTarget(country = null) {
 
   if (target.names.length) {
     const nameMatchedOption = options.find((option) => {
-      const optionText = normalizePhoneCountryMatchText(`${getActionText(option) || ''} ${option.textContent || ''}`);
+      const optionText = getPhoneCountryOptionMatchText(option);
       return target.names.some((name) => optionText.includes(normalizePhoneCountryMatchText(name)));
     });
     if (nameMatchedOption) {
@@ -1036,6 +1073,92 @@ function findPhoneCountryOptionByTarget(country = null) {
       const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
       return text.includes(`+${target.dialCode}`) || text.includes(`+(${target.dialCode})`);
     }) || null;
+  }
+
+  return null;
+}
+
+function getPhoneCountryListBox() {
+  const listBox = document.querySelector('[role="listbox"]');
+  return listBox && isVisibleElement(listBox) ? listBox : null;
+}
+
+function scrollPhoneCountryListBox(listBox, direction = 'down') {
+  if (!listBox) {
+    return false;
+  }
+
+  const maxScrollTop = Math.max(0, (Number(listBox.scrollHeight) || 0) - (Number(listBox.clientHeight) || 0));
+  if (maxScrollTop <= 0) {
+    return false;
+  }
+
+  const viewportHeight = Math.max(40, Number(listBox.clientHeight) || 0);
+  const nextStep = Math.max(80, Math.floor(viewportHeight * 0.85));
+  const currentTop = Number(listBox.scrollTop) || 0;
+  const targetTop = direction === 'up'
+    ? Math.max(0, currentTop - nextStep)
+    : Math.min(maxScrollTop, currentTop + nextStep);
+
+  if (targetTop === currentTop) {
+    return false;
+  }
+
+  if (typeof listBox.scrollTo === 'function') {
+    listBox.scrollTo({ top: targetTop, behavior: 'auto' });
+  } else {
+    listBox.scrollTop = targetTop;
+  }
+  return true;
+}
+
+async function findPhoneCountryOption(targetCountry = null, phoneNumber = '', timeoutMs = 5000) {
+  const start = Date.now();
+  const listBox = getPhoneCountryListBox();
+  const seenScrollTops = new Set();
+  let direction = 'down';
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+    const option = findPhoneCountryOptionByTarget(targetCountry) || findPhoneCountryOptionForNumber(phoneNumber);
+    if (option) {
+      return option;
+    }
+
+    if (!listBox) {
+      await sleep(120);
+      continue;
+    }
+
+    const currentTop = Math.round(Number(listBox.scrollTop) || 0);
+    const directionKey = `${direction}:${currentTop}`;
+    if (seenScrollTops.has(directionKey)) {
+      if (direction === 'down') {
+        direction = 'up';
+      } else {
+        break;
+      }
+    }
+    seenScrollTops.add(directionKey);
+
+    const moved = scrollPhoneCountryListBox(listBox, direction);
+    if (!moved) {
+      if (direction === 'down') {
+        direction = 'up';
+        if (currentTop > 0) {
+          if (typeof listBox.scrollTo === 'function') {
+            listBox.scrollTo({ top: 0, behavior: 'auto' });
+          } else {
+            listBox.scrollTop = 0;
+          }
+          await sleep(120);
+          continue;
+        }
+      }
+      break;
+    }
+
+    await sleep(120);
   }
 
   return null;
@@ -1089,16 +1212,7 @@ async function ensurePhoneCountryMatchesNumber(phoneNumber = '', country = null)
   await humanPause(200, 500);
   simulateClick(selectButton);
 
-  const start = Date.now();
-  let option = null;
-  while (Date.now() - start < 5000) {
-    throwIfStopped();
-    option = findPhoneCountryOptionByTarget(targetCountry) || findPhoneCountryOptionForNumber(phoneNumber);
-    if (option) {
-      break;
-    }
-    await sleep(120);
-  }
+  const option = await findPhoneCountryOption(targetCountry, phoneNumber, 5000);
 
   if (!option) {
     await humanPause(100, 200);
@@ -1422,18 +1536,26 @@ async function submitPhoneNumber(payload = {}) {
       'info'
     );
   } else {
-    log('手机号验证：未能自动匹配国家区号，将按当前页面已选国家继续填写。', 'warn');
+    log('手机号验证：未能自动匹配国家区号，将按泰国 +66 保底方式继续填写。', 'error');
   }
 
   await humanPause(450, 1100);
   const fullDigitsPhoneNumber = getPhoneDigits(phoneNumber);
   const hiddenPhoneInput = getPhoneNumberHiddenInput();
-  fillInput(phoneInput, fullDigitsPhoneNumber || phoneNumber);
+  let phoneInputValue = fullDigitsPhoneNumber || phoneNumber;
+  let hiddenValue = fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim();
+  if (!countryMatch.matched) {
+    setPhoneCountryHiddenSelectValue(FIXED_PHONE_COUNTRY_FALLBACK.key);
+    const fallbackValue = buildFixedPhoneCountryFallbackValue(phoneNumber, FIXED_PHONE_COUNTRY_FALLBACK);
+    phoneInputValue = fallbackValue || phoneInputValue;
+    hiddenValue = fallbackValue || hiddenValue;
+  }
+
+  fillInput(phoneInput, phoneInputValue);
   if (hiddenPhoneInput) {
-    const hiddenValue = fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim();
     fillInput(hiddenPhoneInput, hiddenValue);
   }
-  log(`手机号验证：已填写完整手机号 ${fullDigitsPhoneNumber || phoneNumber}`);
+  log(`手机号验证：已填写完整手机号 ${hiddenValue || phoneInputValue || fullDigitsPhoneNumber || phoneNumber}`);
   await sleep(500);
   const latestActionButton = getPhoneVerificationActionButton({ allowDisabled: true }) || actionButton;
   if (!latestActionButton || !isActionEnabled(latestActionButton)) {

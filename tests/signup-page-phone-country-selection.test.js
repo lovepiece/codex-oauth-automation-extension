@@ -55,6 +55,7 @@ function extractFunction(name) {
 test('findPhoneCountryOptionByTarget matches dropdown option by country names from payload', () => {
   const bundle = [
     extractFunction('getPhoneCountryOptionKey'),
+    extractFunction('getPhoneCountryOptionMatchText'),
     extractFunction('normalizePhoneCountryMatchText'),
     extractFunction('normalizePhoneCountryTarget'),
     extractFunction('findPhoneCountryOptionByTarget'),
@@ -107,4 +108,116 @@ return { findPhoneCountryOptionByTarget, thaiOption, chinaOption };
   });
 
   assert.equal(option, api.thaiOption);
+});
+
+test('findPhoneCountryOption scrolls virtualized listbox to locate target country', async () => {
+  const bundle = [
+    extractFunction('getPhoneDigits'),
+    extractFunction('getPhoneCountryOptionDialCode'),
+    extractFunction('getPhoneCountryOptionKey'),
+    extractFunction('getPhoneCountryOptionMatchText'),
+    extractFunction('normalizePhoneCountryMatchText'),
+    extractFunction('normalizePhoneCountryTarget'),
+    extractFunction('findPhoneCountryOptionForNumber'),
+    extractFunction('findPhoneCountryOptionByTarget'),
+    extractFunction('getPhoneCountryListBox'),
+    extractFunction('scrollPhoneCountryListBox'),
+    extractFunction('findPhoneCountryOption'),
+  ].join('\n');
+
+  const factory = new Function(`
+function createOption(id, key, text) {
+  return {
+    id,
+    textContent: text,
+    getAttribute(name) {
+      if (name === 'aria-disabled') return 'false';
+      if (name === 'data-key') return key;
+      return '';
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+}
+
+const firstPageOptions = [
+  createOption('option-US', 'US', '美国 (+1)'),
+  createOption('option-CN', 'CN', '中国 (+86)'),
+];
+const secondPageOptions = [
+  createOption('option-TH', 'TH', '泰国 (+66)'),
+];
+
+const listBox = {
+  scrollTop: 0,
+  clientHeight: 400,
+  scrollHeight: 9800,
+  scrollTo({ top }) {
+    this.scrollTop = top;
+  },
+};
+
+const document = {
+  querySelector(selector) {
+    if (selector === '[role="listbox"]') {
+      return listBox;
+    }
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector !== '[role="option"]') {
+      return [];
+    }
+    return listBox.scrollTop >= 300 ? secondPageOptions : firstPageOptions;
+  },
+};
+
+function getActionText(option) {
+  return option.textContent || '';
+}
+function isVisibleElement() {
+  return true;
+}
+function throwIfStopped() {}
+async function sleep() {}
+
+${bundle}
+
+return { findPhoneCountryOption, listBox, secondPageOptions };
+`);
+
+  const api = factory();
+  const option = await api.findPhoneCountryOption({
+    name: '泰国',
+    eng: 'Thailand',
+    names: ['泰国', 'Thailand'],
+  }, '66834507628', 2000);
+
+  assert.equal(option, api.secondPageOptions[0]);
+  assert.ok(api.listBox.scrollTop > 0);
+});
+
+test('buildFixedPhoneCountryFallbackValue falls back to Thailand +66 format', () => {
+  const bundle = [
+    extractFunction('getPhoneDigits'),
+    extractFunction('buildFixedPhoneCountryFallbackValue'),
+  ].join('\n');
+
+  const factory = new Function(`
+const FIXED_PHONE_COUNTRY_FALLBACK = {
+  key: 'TH',
+  dialCode: '66',
+  name: '泰国',
+};
+
+${bundle}
+
+return { buildFixedPhoneCountryFallbackValue };
+`);
+
+  const api = factory();
+
+  assert.equal(api.buildFixedPhoneCountryFallbackValue('66834507628'), '+66834507628');
+  assert.equal(api.buildFixedPhoneCountryFallbackValue('834507628'), '+66834507628');
 });

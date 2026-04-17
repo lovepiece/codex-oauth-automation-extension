@@ -10278,7 +10278,7 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
     await setHeroSmsRuntimeStatusState(`正在提交手机号 ${activation.phoneNumber}`);
     await addLog(
       `步骤 8：检测到手机号页面，正在使用 HeroSMS 号码 ${activation.phoneNumber}${phoneCountry?.name ? `（国家：${phoneCountry.name}）` : ''} 自动接码...`,
-      'warn'
+      'info'
     );
 
     try {
