@@ -19,6 +19,11 @@
       throwIfStopped,
     } = deps;
 
+    function isAddPhoneAuthFailure(error) {
+      const message = String(typeof error === 'string' ? error : error?.message || '');
+      return /https:\/\/auth\.openai\.com\/add-phone(?:[/?#]|$)|add-phone|手机号页面|手机号码|手机号|phone\s+number|telephone/i.test(message);
+    }
+
     async function executeStep7(state) {
       if (!state.email) {
         throw new Error('缺少邮箱地址，请先完成步骤 3。');
@@ -91,6 +96,9 @@
           throw new Error('步骤 7：认证页未返回可识别的登录结果。');
         } catch (err) {
           throwIfStopped(err);
+          if (isAddPhoneAuthFailure(err)) {
+            throw err;
+          }
           lastError = err;
           if (attempt >= STEP6_MAX_ATTEMPTS) {
             break;

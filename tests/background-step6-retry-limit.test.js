@@ -75,6 +75,57 @@ test('step 7 retries up to configured limit and then fails', async () => {
   assert.equal(events.completed, 0);
 });
 
+test('step 7 exits internal retry loop immediately when add-phone is detected', async () => {
+  const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
+
+  const events = {
+    refreshCalls: 0,
+    sendCalls: 0,
+    completed: 0,
+    logs: [],
+  };
+
+  const executor = api.createStep7Executor({
+    addLog: async (message, level = 'info') => {
+      events.logs.push({ message, level });
+    },
+    completeStepFromBackground: async () => {
+      events.completed += 1;
+    },
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getLoginAuthStateLabel: (state) => state || 'unknown',
+    getState: async () => ({ email: 'user@example.com', password: 'secret' }),
+    isStep6RecoverableResult: (result) => result?.step6Outcome === 'recoverable',
+    isStep6SuccessResult: (result) => result?.step6Outcome === 'success',
+    refreshOAuthUrlBeforeStep6: async () => {
+      events.refreshCalls += 1;
+      return `https://oauth.example/${events.refreshCalls}`;
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async () => {
+      events.sendCalls += 1;
+      throw new Error('提交密码后页面直接进入手机号页面，未经过登录验证码页。URL: https://auth.openai.com/add-phone');
+    },
+    STEP6_MAX_ATTEMPTS: 3,
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep7({ email: 'user@example.com', password: 'secret' }),
+    /add-phone/
+  );
+
+  assert.equal(events.refreshCalls, 1, 'add-phone should stop further OAuth refresh attempts');
+  assert.equal(events.sendCalls, 1, 'add-phone should stop after the first failed login attempt');
+  assert.equal(events.completed, 0);
+  assert.ok(
+    !events.logs.some(({ message }) => /准备重试/.test(message)),
+    'add-phone failure should not be logged as an internal retryable attempt'
+  );
+});
+
 test('step 7 starts a new oauth timeout window for each refreshed oauth url', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
