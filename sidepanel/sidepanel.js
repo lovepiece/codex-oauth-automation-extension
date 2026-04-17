@@ -81,9 +81,25 @@ const inputTempEmailCustomAuth = document.getElementById('input-temp-email-custo
 const rowTempEmailReceiveMailbox = document.getElementById('row-temp-email-receive-mailbox');
 const inputTempEmailReceiveMailbox = document.getElementById('input-temp-email-receive-mailbox');
 const rowTempEmailDomain = document.getElementById('row-temp-email-domain');
-const selectTempEmailDomain = document.getElementById('select-temp-email-domain');
 const inputTempEmailDomain = document.getElementById('input-temp-email-domain');
-const btnTempEmailDomainMode = document.getElementById('btn-temp-email-domain-mode');
+const checkboxTempEmailUseSubdomain = document.getElementById('checkbox-temp-email-use-subdomain');
+const inputTempEmailSubdomain = document.getElementById('input-temp-email-subdomain');
+const rowTempEmailInboxTools = document.getElementById('row-temp-email-inbox-tools');
+const btnTempEmailReadLatest = document.getElementById('btn-temp-email-read-latest');
+const displayTempEmailLatest = document.getElementById('display-temp-email-latest');
+const heroSmsSection = document.getElementById('hero-sms-section');
+const inputHeroSmsBaseUrl = document.getElementById('input-hero-sms-base-url');
+const inputHeroSmsApiKey = document.getElementById('input-hero-sms-api-key');
+const inputHeroSmsService = document.getElementById('input-hero-sms-service');
+const inputHeroSmsCountry = document.getElementById('input-hero-sms-country');
+const displayHeroSmsPhone = document.getElementById('display-hero-sms-phone');
+const displayHeroSmsRemaining = document.getElementById('display-hero-sms-remaining');
+const displayHeroSmsUsage = document.getElementById('display-hero-sms-usage');
+const displayHeroSmsCode = document.getElementById('display-hero-sms-code');
+const displayHeroSmsStatus = document.getElementById('display-hero-sms-status');
+const displayHeroSmsFailedCount = document.getElementById('display-hero-sms-failed-count');
+const heroSmsFailedList = document.getElementById('hero-sms-failed-list');
+const btnHeroSmsResend = document.getElementById('btn-hero-sms-resend');
 const hotmailSection = document.getElementById('hotmail-section');
 const luckmailSection = document.getElementById('luckmail-section');
 const icloudSection = document.getElementById('icloud-section');
@@ -157,9 +173,11 @@ const btnCfDomainMode = document.getElementById('btn-cf-domain-mode');
 const inputRunCount = document.getElementById('input-run-count');
 const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
+const selectAutoRetryMode = document.getElementById('select-auto-retry-mode');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
 const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes');
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
+const inputAutoSkipSteps = document.getElementById('input-auto-skip-steps');
 const autoStartModal = document.getElementById('auto-start-modal');
 const autoStartTitle = autoStartModal?.querySelector('.modal-title');
 const autoStartMessage = document.getElementById('auto-start-message');
@@ -182,8 +200,9 @@ const STEP_DEFAULT_STATUSES = {
   7: 'pending',
   8: 'pending',
   9: 'pending',
+  10: 'pending',
 };
-const SKIPPABLE_STEPS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+const SKIPPABLE_STEPS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 const AUTO_DELAY_MIN_MINUTES = 1;
 const AUTO_DELAY_MAX_MINUTES = 1440;
 const AUTO_DELAY_DEFAULT_MINUTES = 30;
@@ -207,6 +226,9 @@ const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const ICLOUD_PROVIDER = 'icloud';
 const GMAIL_PROVIDER = 'gmail';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
+const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
+const HERO_SMS_NUMBER_MAX_USES = 5;
+const DEFAULT_AUTO_RETRY_MODE = 'retry';
 const DEFAULT_LUCKMAIL_BASE_URL = 'https://mails.luckyous.com';
 const DEFAULT_LUCKMAIL_EMAIL_TYPE = 'ms_graph';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
@@ -227,7 +249,7 @@ let settingsDirty = false;
 let settingsSaveInFlight = false;
 let settingsAutoSaveTimer = null;
 let cloudflareDomainEditMode = false;
-let cloudflareTempEmailDomainEditMode = false;
+let latestCloudflareTempEmailReadResult = null;
 let icloudRefreshQueued = false;
 let lastRenderedIcloudAliases = [];
 let icloudSelectedEmails = new Set();
@@ -242,6 +264,9 @@ let hotmailListExpanded = false;
 let configMenuOpen = false;
 let configActionInFlight = false;
 let currentReleaseSnapshot = null;
+let heroSmsActionInFlight = false;
+let heroSmsAutoReleaseInFlight = false;
+let heroSmsAutoReleaseKey = '';
 
 const EYE_OPEN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_CLOSED_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19C5 19 1 12 1 12a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.86 21.86 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>';
@@ -706,7 +731,7 @@ function getStepStatuses(state = latestState) {
 
 function getFirstUnfinishedStep(state = latestState) {
   const statuses = getStepStatuses(state);
-  for (let step = 1; step <= 9; step++) {
+  for (let step = 1; step <= 10; step++) {
     if (!isDoneStatus(statuses[step])) {
       return step;
     }
@@ -761,7 +786,7 @@ function syncAutoRunState(source = {}) {
   const autoRunning = source.autoRunning !== undefined
     ? Boolean(source.autoRunning)
     : (source.autoRunPhase !== undefined || source.phase !== undefined
-      ? ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase)
+      ? ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_retry_confirm', 'retrying', 'waiting_interval'].includes(phase)
       : currentAutoRun.autoRunning);
 
   currentAutoRun = {
@@ -785,7 +810,7 @@ function isAutoRunLockedPhase() {
 }
 
 function isAutoRunPausedPhase() {
-  return currentAutoRun.phase === 'waiting_email';
+  return currentAutoRun.phase === 'waiting_email' || currentAutoRun.phase === 'waiting_retry_confirm';
 }
 
 function isAutoRunWaitingStepPhase() {
@@ -851,6 +876,29 @@ function formatAutoStepDelayInputValue(value) {
   return normalized === null ? '' : String(normalized);
 }
 
+function normalizeAutoSkipStepsValue(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[,\s，、]+/);
+  const seen = new Set();
+  const steps = [];
+
+  for (const item of source) {
+    const numeric = Number(String(item ?? '').trim());
+    if (!Number.isInteger(numeric) || numeric < 1 || numeric > 10 || seen.has(numeric)) {
+      continue;
+    }
+    seen.add(numeric);
+    steps.push(numeric);
+  }
+
+  return steps.sort((left, right) => left - right);
+}
+
+function formatAutoSkipStepsValue(value) {
+  return normalizeAutoSkipStepsValue(value).join(',');
+}
+
 function getRunCountValue() {
   return Math.min(50, Math.max(1, parseInt(inputRunCount.value, 10) || 1));
 }
@@ -875,6 +923,232 @@ function formatCountdown(remainingMs) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function normalizeHeroSmsBaseUrlValue(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HERO_SMS_BASE_URL;
+
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    parsed.search = '';
+    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return DEFAULT_HERO_SMS_BASE_URL;
+  }
+}
+
+function normalizeHeroSmsServiceValue(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeHeroSmsCountryValue(value = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue || !/^\d+$/.test(rawValue)) {
+    return '';
+  }
+  return String(Math.max(0, Number(rawValue)));
+}
+
+function normalizeHeroSmsActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const acquiredAt = Number(value.acquiredAt) || Date.now();
+  const expiresAt = Number(value.expiresAt) || acquiredAt;
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsServiceValue(value.service),
+    country: normalizeHeroSmsCountryValue(value.country),
+    acquiredAt,
+    expiresAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    lastCode: String(value.lastCode || '').trim(),
+    lastStatus: String(value.lastStatus || '').trim(),
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+  };
+}
+
+function normalizeHeroSmsFailedActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const failedAt = Number(value.failedAt) || 0;
+  const cleanupAt = Number(value.cleanupAt) || 0;
+  return {
+    activationId,
+    phoneNumber,
+    failedAt,
+    cleanupAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'scheduled').trim() || 'scheduled',
+    cleanupResponse: String(value.cleanupResponse || '').trim(),
+    cleanupError: String(value.cleanupError || '').trim(),
+    cleanupAttemptedAt: Number(value.cleanupAttemptedAt) || 0,
+    cleanupCompletedAt: Number(value.cleanupCompletedAt) || 0,
+  };
+}
+
+function getHeroSmsFailedActivationList(state = latestState) {
+  if (!Array.isArray(state?.heroSmsFailedActivations)) {
+    return [];
+  }
+
+  return state.heroSmsFailedActivations
+    .map((item) => normalizeHeroSmsFailedActivationState(item))
+    .filter(Boolean)
+    .sort((left, right) => (right.failedAt || 0) - (left.failedAt || 0));
+}
+
+function getHeroSmsActivationRemainingMs(activation, now = Date.now()) {
+  const normalized = normalizeHeroSmsActivationState(activation);
+  if (!normalized) return 0;
+  return Math.max(0, normalized.expiresAt - now);
+}
+
+function getCurrentHeroSmsActivation(state = latestState) {
+  return normalizeHeroSmsActivationState(state?.currentHeroSmsActivation);
+}
+
+function updateHeroSmsResendButtonState() {
+  if (!btnHeroSmsResend) {
+    return;
+  }
+  btnHeroSmsResend.disabled = heroSmsActionInFlight || heroSmsAutoReleaseInFlight || !getCurrentHeroSmsActivation();
+  btnHeroSmsResend.textContent = heroSmsActionInFlight ? '请求中' : '重新获取验证码';
+}
+
+function maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs) {
+  if (!activation || remainingMs > 0 || heroSmsAutoReleaseInFlight) {
+    return;
+  }
+
+  const releaseKey = `${activation.activationId}:${activation.expiresAt}`;
+  if (heroSmsAutoReleaseKey === releaseKey) {
+    return;
+  }
+
+  heroSmsAutoReleaseKey = releaseKey;
+  heroSmsAutoReleaseInFlight = true;
+  chrome.runtime.sendMessage({
+    type: 'HERO_SMS_RELEASE_NUMBER',
+    source: 'sidepanel',
+    payload: {
+      preferComplete: activation.useCount >= HERO_SMS_NUMBER_MAX_USES,
+      releaseReason: 'expired_in_sidepanel',
+    },
+  }).catch((err) => {
+    heroSmsAutoReleaseKey = '';
+    console.warn('[SidePanel] HeroSMS auto release failed:', err?.message || err);
+  }).finally(() => {
+    heroSmsAutoReleaseInFlight = false;
+  });
+}
+
+function formatHeroSmsFailedActivationStatus(item) {
+  switch (item?.status) {
+    case 'scheduled':
+      return '等待清理';
+    case 'cancelled':
+      return '已取消';
+    case 'completed':
+      return '已完成激活';
+    case 'cleanup_failed':
+      return '清理失败';
+    default:
+      return item?.status || '未知';
+  }
+}
+
+function renderHeroSmsFailedActivationList(state = latestState) {
+  if (!heroSmsFailedList) {
+    return;
+  }
+
+  const items = getHeroSmsFailedActivationList(state);
+  if (displayHeroSmsFailedCount) {
+    displayHeroSmsFailedCount.textContent = String(items.length);
+  }
+
+  if (!items.length) {
+    heroSmsFailedList.innerHTML = '<div class="hero-sms-failed-empty">暂无失败号码记录。</div>';
+    return;
+  }
+
+  heroSmsFailedList.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'hero-sms-failed-item';
+
+    const now = Date.now();
+    const cleanupCountdown = item.cleanupCompletedAt
+      ? '已处理'
+      : (item.cleanupAt > now ? formatCountdown(item.cleanupAt - now) : '处理中');
+
+    row.innerHTML = `
+      <div class="hero-sms-failed-meta">
+        <span class="hero-sms-failed-phone mono">${item.phoneNumber}</span>
+        <span class="hero-sms-failed-status">${formatHeroSmsFailedActivationStatus(item)}</span>
+      </div>
+      <div class="hero-sms-failed-detail mono">ID ${item.activationId} · 2分钟清理 ${cleanupCountdown}</div>
+      <div class="hero-sms-failed-detail">${item.reason || 'unknown'}${item.useCount ? ` · 已用 ${item.useCount} 次` : ''}</div>
+      <div class="hero-sms-failed-detail">${item.cleanupError || item.cleanupResponse || item.errorText || '等待后台清理线程执行'}</div>
+    `;
+    heroSmsFailedList.appendChild(row);
+  });
+}
+
+function renderHeroSmsPanel(state = latestState) {
+  if (!heroSmsSection) {
+    return;
+  }
+
+  const activation = getCurrentHeroSmsActivation(state);
+  const remainingMs = getHeroSmsActivationRemainingMs(activation);
+  const lastCode = String(state?.heroSmsLastCode || activation?.lastCode || '').trim();
+  const runtimeStatus = String(state?.heroSmsRuntimeStatus || '').trim();
+
+  if (displayHeroSmsPhone) {
+    displayHeroSmsPhone.textContent = activation?.phoneNumber || '等待进入手机号页面';
+  }
+  if (displayHeroSmsRemaining) {
+    displayHeroSmsRemaining.textContent = activation
+      ? (remainingMs > 0 ? formatCountdown(remainingMs) : '已到期')
+      : (runtimeStatus ? '等待分配' : '未分配');
+  }
+  if (displayHeroSmsUsage) {
+    displayHeroSmsUsage.textContent = `${activation?.useCount || 0}/${HERO_SMS_NUMBER_MAX_USES}`;
+  }
+  if (displayHeroSmsCode) {
+    displayHeroSmsCode.textContent = lastCode || '等待中';
+  }
+  if (displayHeroSmsStatus) {
+    displayHeroSmsStatus.textContent = runtimeStatus || activation?.lastStatus || (activation ? '等待短信' : '未开始');
+  }
+
+  maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs);
+  updateHeroSmsResendButtonState();
+  renderHeroSmsFailedActivationList(state);
 }
 
 function formatScheduleTime(timestamp) {
@@ -1028,6 +1302,62 @@ function normalizeCloudflareTempEmailDomains(values = []) {
   return domains;
 }
 
+function normalizeCloudflareTempEmailSubdomainLabelValue(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 63);
+}
+
+function getCloudflareTempEmailReadTarget() {
+  return normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox?.value || '')
+    || normalizeCloudflareTempEmailReceiveMailboxValue(inputEmail?.value || latestState?.email || '');
+}
+
+function getCloudflareTempEmailIdleSummary() {
+  const target = getCloudflareTempEmailReadTarget();
+  return target
+    ? `当前轮询邮箱：${target}`
+    : '填写注册邮箱或“邮件接收”邮箱后，可读取最新验证码';
+}
+
+function renderCloudflareTempEmailLatestSummary(snapshot = latestCloudflareTempEmailReadResult) {
+  if (!displayTempEmailLatest) {
+    return;
+  }
+
+  if (!snapshot || typeof snapshot !== 'object') {
+    displayTempEmailLatest.textContent = getCloudflareTempEmailIdleSummary();
+    return;
+  }
+
+  const address = String(snapshot.address || '').trim();
+  if (snapshot.latestCode) {
+    displayTempEmailLatest.textContent = `${address || '当前邮箱'} | 验证码 ${snapshot.latestCode}${snapshot.latestSubject ? ` | ${snapshot.latestSubject}` : ''}`;
+    return;
+  }
+
+  if (snapshot.latestSubject) {
+    displayTempEmailLatest.textContent = `${address || '当前邮箱'} | 最新主题：${snapshot.latestSubject}`;
+    return;
+  }
+
+  if (snapshot.messageCount > 0) {
+    displayTempEmailLatest.textContent = `${address || '当前邮箱'} | 已读取 ${snapshot.messageCount} 封邮件，但暂未提取到验证码`;
+    return;
+  }
+
+  displayTempEmailLatest.textContent = `${address || '当前邮箱'} | 暂无邮件`;
+}
+
+function resetCloudflareTempEmailLatestSummary() {
+  latestCloudflareTempEmailReadResult = null;
+  renderCloudflareTempEmailLatestSummary();
+}
+
 function getCloudflareDomainsFromState() {
   const domains = normalizeCloudflareDomains(latestState?.cloudflareDomains || []);
   const activeDomain = normalizeCloudflareDomainValue(latestState?.cloudflareDomain || '');
@@ -1072,32 +1402,6 @@ function renderCloudflareDomainOptions(preferredDomain = '') {
   selectCfDomain.value = domains.includes(selected) ? selected : domains[0];
 }
 
-function renderCloudflareTempEmailDomainOptions(preferredDomain = '') {
-  const preferred = normalizeCloudflareTempEmailDomainValue(preferredDomain);
-  const { domains, activeDomain } = getCloudflareTempEmailDomainsFromState();
-  const selected = preferred || activeDomain;
-
-  selectTempEmailDomain.innerHTML = '';
-  if (domains.length === 0) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = '请先添加域名';
-    selectTempEmailDomain.appendChild(option);
-    selectTempEmailDomain.disabled = true;
-    selectTempEmailDomain.value = '';
-    return;
-  }
-
-  for (const domain of domains) {
-    const option = document.createElement('option');
-    option.value = domain;
-    option.textContent = domain;
-    selectTempEmailDomain.appendChild(option);
-  }
-  selectTempEmailDomain.disabled = false;
-  selectTempEmailDomain.value = domains.includes(selected) ? selected : domains[0];
-}
-
 function setCloudflareDomainEditMode(editing, options = {}) {
   const { clearInput = false } = options;
   cloudflareDomainEditMode = Boolean(editing);
@@ -1114,31 +1418,13 @@ function setCloudflareDomainEditMode(editing, options = {}) {
   }
 }
 
-function setCloudflareTempEmailDomainEditMode(editing, options = {}) {
-  const { clearInput = false } = options;
-  cloudflareTempEmailDomainEditMode = Boolean(editing);
-  selectTempEmailDomain.style.display = cloudflareTempEmailDomainEditMode ? 'none' : '';
-  inputTempEmailDomain.style.display = cloudflareTempEmailDomainEditMode ? '' : 'none';
-  btnTempEmailDomainMode.textContent = cloudflareTempEmailDomainEditMode ? '保存' : '添加';
-  if (cloudflareTempEmailDomainEditMode) {
-    if (clearInput) {
-      inputTempEmailDomain.value = '';
-    }
-    inputTempEmailDomain.focus();
-  } else if (clearInput) {
-    inputTempEmailDomain.value = '';
-  }
-}
-
 function collectSettingsPayload() {
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
   ) || activeDomain;
-  const { domains: tempEmailDomains, activeDomain: tempEmailActiveDomain } = getCloudflareTempEmailDomainsFromState();
-  const selectedCloudflareTempEmailDomain = normalizeCloudflareTempEmailDomainValue(
-    !cloudflareTempEmailDomainEditMode ? selectTempEmailDomain.value : tempEmailActiveDomain
-  ) || tempEmailActiveDomain;
+  const selectedCloudflareTempEmailDomain = normalizeCloudflareTempEmailDomainValue(inputTempEmailDomain.value);
+  const tempEmailSubdomain = normalizeCloudflareTempEmailSubdomainLabelValue(inputTempEmailSubdomain?.value);
   return {
     panelMode: selectPanelMode.value,
     vpsUrl: inputVpsUrl.value.trim(),
@@ -1161,6 +1447,10 @@ function collectSettingsPayload() {
     hotmailServiceMode: getSelectedHotmailServiceMode(),
     hotmailRemoteBaseUrl: inputHotmailRemoteBaseUrl.value.trim(),
     hotmailLocalBaseUrl: inputHotmailLocalBaseUrl.value.trim(),
+    heroSmsBaseUrl: normalizeHeroSmsBaseUrlValue(inputHeroSmsBaseUrl.value),
+    heroSmsApiKey: inputHeroSmsApiKey.value,
+    heroSmsService: normalizeHeroSmsServiceValue(inputHeroSmsService.value),
+    heroSmsCountry: normalizeHeroSmsCountryValue(inputHeroSmsCountry.value),
     luckmailApiKey: inputLuckmailApiKey.value,
     luckmailBaseUrl: normalizeLuckmailBaseUrl(inputLuckmailBaseUrl.value),
     luckmailEmailType: normalizeLuckmailEmailType(selectLuckmailEmailType.value),
@@ -1172,12 +1462,16 @@ function collectSettingsPayload() {
     cloudflareTempEmailCustomAuth: inputTempEmailCustomAuth.value,
     cloudflareTempEmailReceiveMailbox: normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value),
     cloudflareTempEmailDomain: selectedCloudflareTempEmailDomain,
-    cloudflareTempEmailDomains: tempEmailDomains,
+    cloudflareTempEmailDomains: selectedCloudflareTempEmailDomain ? [selectedCloudflareTempEmailDomain] : [],
+    cloudflareTempEmailUseSubdomain: Boolean(checkboxTempEmailUseSubdomain?.checked),
+    cloudflareTempEmailSubdomain: tempEmailSubdomain,
     autoRunSkipFailures: inputAutoSkipFailures.checked,
+    autoRetryMode: normalizeAutoRetryMode(selectAutoRetryMode?.value),
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
     autoStepDelaySeconds: normalizeAutoStepDelaySeconds(inputAutoStepDelaySeconds.value),
+    autoSkipSteps: normalizeAutoSkipStepsValue(inputAutoSkipSteps?.value),
   };
 }
 
@@ -1206,6 +1500,12 @@ function normalizeHotmailServiceMode(value = '') {
   return String(value || '').trim().toLowerCase() === HOTMAIL_SERVICE_MODE_REMOTE
     ? HOTMAIL_SERVICE_MODE_REMOTE
     : HOTMAIL_SERVICE_MODE_LOCAL;
+}
+
+function normalizeAutoRetryMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'pause'
+    ? 'pause'
+    : DEFAULT_AUTO_RETRY_MODE;
 }
 
 function getSelectedLocalCpaStep9Mode() {
@@ -1390,6 +1690,12 @@ function applyAutoRunStatus(payload = currentAutoRun) {
     || isCustomMailProvider();
   inputEmail.disabled = locked;
   inputAutoSkipFailures.disabled = scheduled;
+  if (selectAutoRetryMode) {
+    selectAutoRetryMode.disabled = currentAutoRun.autoRunning;
+  }
+  if (inputAutoSkipSteps) {
+    inputAutoSkipSteps.disabled = currentAutoRun.autoRunning;
+  }
 
   if (currentAutoRun.totalRuns > 0) {
     inputRunCount.value = String(currentAutoRun.totalRuns);
@@ -1406,6 +1712,18 @@ function applyAutoRunStatus(payload = currentAutoRun) {
       break;
     case 'waiting_email':
       autoContinueBar.style.display = 'flex';
+      if (autoHintText) {
+        autoHintText.textContent = '先自动获取邮箱，或手动粘贴邮箱后再继续';
+      }
+      btnAutoContinue.textContent = '继续';
+      btnAutoRun.innerHTML = `已暂停${runLabel}`;
+      break;
+    case 'waiting_retry_confirm':
+      autoContinueBar.style.display = 'flex';
+      if (autoHintText) {
+        autoHintText.textContent = currentAutoRun.countdownNote || '当前尝试失败，已暂停自动重试；确认后可继续下一次尝试';
+      }
+      btnAutoContinue.textContent = '继续重试';
       btnAutoRun.innerHTML = `已暂停${runLabel}`;
       break;
     case 'running':
@@ -1523,6 +1841,10 @@ function applySettingsState(state) {
   setHotmailServiceMode(state?.hotmailServiceMode);
   inputHotmailRemoteBaseUrl.value = state?.hotmailRemoteBaseUrl || '';
   inputHotmailLocalBaseUrl.value = state?.hotmailLocalBaseUrl || '';
+  inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(state?.heroSmsBaseUrl);
+  inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
+  inputHeroSmsService.value = state?.heroSmsService || '';
+  inputHeroSmsCountry.value = state?.heroSmsCountry || '';
   inputLuckmailApiKey.value = state?.luckmailApiKey || '';
   inputLuckmailBaseUrl.value = normalizeLuckmailBaseUrl(state?.luckmailBaseUrl);
   selectLuckmailEmailType.value = normalizeLuckmailEmailType(state?.luckmailEmailType);
@@ -1531,15 +1853,29 @@ function applySettingsState(state) {
   inputTempEmailAdminAuth.value = state?.cloudflareTempEmailAdminAuth || '';
   inputTempEmailCustomAuth.value = state?.cloudflareTempEmailCustomAuth || '';
   inputTempEmailReceiveMailbox.value = state?.cloudflareTempEmailReceiveMailbox || '';
+  inputTempEmailDomain.value = state?.cloudflareTempEmailDomain
+    || normalizeCloudflareTempEmailDomainValue(Array.isArray(state?.cloudflareTempEmailDomains) ? state.cloudflareTempEmailDomains[0] : '')
+    || '';
+  if (checkboxTempEmailUseSubdomain) {
+    checkboxTempEmailUseSubdomain.checked = Boolean(state?.cloudflareTempEmailUseSubdomain);
+  }
+  if (inputTempEmailSubdomain) {
+    inputTempEmailSubdomain.value = state?.cloudflareTempEmailSubdomain || '';
+    inputTempEmailSubdomain.disabled = !Boolean(state?.cloudflareTempEmailUseSubdomain);
+  }
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
-  renderCloudflareTempEmailDomainOptions(state?.cloudflareTempEmailDomain || '');
-  setCloudflareTempEmailDomainEditMode(false, { clearInput: true });
   inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
+  if (selectAutoRetryMode) {
+    selectAutoRetryMode.value = normalizeAutoRetryMode(state?.autoRetryMode);
+  }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
   inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state?.autoRunDelayMinutes));
   inputAutoStepDelaySeconds.value = formatAutoStepDelayInputValue(state?.autoStepDelaySeconds);
+  if (inputAutoSkipSteps) {
+    inputAutoSkipSteps.value = formatAutoSkipStepsValue(state?.autoSkipSteps);
+  }
   if (state?.autoRunTotalRuns) {
     inputRunCount.value = String(state.autoRunTotalRuns);
   }
@@ -1553,6 +1889,7 @@ function applySettingsState(state) {
   if (isLuckmailProvider(state?.mailProvider)) {
     queueLuckmailPurchaseRefresh();
   }
+  renderHeroSmsPanel(state);
   updateButtonStates();
 }
 
@@ -2668,6 +3005,10 @@ function updateMailProviderUI() {
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
   const showCloudflareTempEmailReceiveMailbox = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
   const showCloudflareTempEmailDomain = useEmailGenerator && useCloudflareTempEmailGenerator;
+  const canReadCloudflareTempEmailInbox = showCloudflareTempEmailSettings
+    && !isAutoRunLockedPhase()
+    && !isAutoRunScheduledPhase()
+    && Boolean(getCloudflareTempEmailReadTarget());
   if (rowEmailGenerator) {
     rowEmailGenerator.style.display = useEmailGenerator ? '' : 'none';
   }
@@ -2693,11 +3034,15 @@ function updateMailProviderUI() {
   rowTempEmailCustomAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailReceiveMailbox.style.display = showCloudflareTempEmailReceiveMailbox ? '' : 'none';
   rowTempEmailDomain.style.display = showCloudflareTempEmailDomain ? '' : 'none';
-  const { domains: tempEmailDomains } = getCloudflareTempEmailDomainsFromState();
-  if (showCloudflareTempEmailDomain) {
-    setCloudflareTempEmailDomainEditMode(cloudflareTempEmailDomainEditMode || tempEmailDomains.length === 0, { clearInput: false });
-  } else {
-    setCloudflareTempEmailDomainEditMode(false, { clearInput: false });
+  if (rowTempEmailInboxTools) {
+    rowTempEmailInboxTools.style.display = showCloudflareTempEmailSettings ? '' : 'none';
+  }
+  if (btnTempEmailReadLatest) {
+    btnTempEmailReadLatest.disabled = !canReadCloudflareTempEmailInbox;
+  }
+  renderCloudflareTempEmailLatestSummary();
+  if (inputTempEmailSubdomain) {
+    inputTempEmailSubdomain.disabled = !showCloudflareTempEmailDomain || !Boolean(checkboxTempEmailUseSubdomain?.checked);
   }
 
   if (hotmailSection) {
@@ -2795,38 +3140,6 @@ async function saveCloudflareDomainSettings(domains, activeDomain, options = {})
   }
 }
 
-async function saveCloudflareTempEmailDomainSettings(domains, activeDomain, options = {}) {
-  const { silent = false } = options;
-  const normalizedDomains = normalizeCloudflareTempEmailDomains(domains);
-  const normalizedActiveDomain = normalizeCloudflareTempEmailDomainValue(activeDomain) || normalizedDomains[0] || '';
-  const payload = {
-    cloudflareTempEmailDomain: normalizedActiveDomain,
-    cloudflareTempEmailDomains: normalizedDomains,
-  };
-
-  const response = await chrome.runtime.sendMessage({
-    type: 'SAVE_SETTING',
-    source: 'sidepanel',
-    payload,
-  });
-
-  if (response?.error) {
-    throw new Error(response.error);
-  }
-
-  syncLatestState({
-    ...payload,
-  });
-  renderCloudflareTempEmailDomainOptions(normalizedActiveDomain);
-  setCloudflareTempEmailDomainEditMode(false, { clearInput: true });
-  markSettingsDirty(false);
-  updateMailProviderUI();
-
-  if (!silent) {
-    showToast('Cloudflare Temp Email 域名已保存', 'success', 1800);
-  }
-}
-
 function updatePanelModeUI() {
   const useSub2Api = selectPanelMode.value === 'sub2api';
   rowVpsUrl.style.display = useSub2Api ? 'none' : '';
@@ -2838,9 +3151,9 @@ function updatePanelModeUI() {
   rowSub2ApiPassword.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiGroup.style.display = useSub2Api ? '' : 'none';
 
-  const step9Btn = document.querySelector('.step-btn[data-step="9"]');
-  if (step9Btn) {
-    step9Btn.textContent = useSub2Api ? 'SUB2API 回调验证' : 'CPA 回调验证';
+  const step10Btn = document.querySelector('.step-btn[data-step="10"]');
+  if (step10Btn) {
+    step10Btn.textContent = useSub2Api ? 'SUB2API 回调验证' : 'CPA 回调验证';
   }
 }
 
@@ -2871,7 +3184,7 @@ function updateStepUI(step, status) {
 
 function updateProgressCounter() {
   const completed = Object.values(getStepStatuses()).filter(isDoneStatus).length;
-  stepsProgress.textContent = `${completed} / 9`;
+  stepsProgress.textContent = `${completed} / 10`;
 }
 
 function updateButtonStates() {
@@ -2880,7 +3193,7 @@ function updateButtonStates() {
   const autoLocked = isAutoRunLockedPhase();
   const autoScheduled = isAutoRunScheduledPhase();
 
-  for (let step = 1; step <= 9; step++) {
+  for (let step = 1; step <= 10; step++) {
     const btn = document.querySelector(`.step-btn[data-step="${step}"]`);
     if (!btn) continue;
 
@@ -2925,6 +3238,10 @@ function updateButtonStates() {
   if (btnIcloudDeleteUsed) btnIcloudDeleteUsed.disabled = disableIcloudControls || !(lastRenderedIcloudAliases.some((alias) => alias.used && !alias.preserved));
   if (selectIcloudHostPreference) selectIcloudHostPreference.disabled = disableIcloudControls;
   if (checkboxAutoDeleteIcloud) checkboxAutoDeleteIcloud.disabled = disableIcloudControls;
+  if (btnTempEmailReadLatest && rowTempEmailInboxTools?.style.display !== 'none') {
+    btnTempEmailReadLatest.disabled = disableIcloudControls || !getCloudflareTempEmailReadTarget();
+  }
+  updateHeroSmsResendButtonState();
   updateStopButtonState(anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked);
 }
 
@@ -2959,7 +3276,9 @@ function updateStatusDisplay(state) {
   }
 
   if (isAutoRunPausedPhase()) {
-    displayStatus.textContent = `自动已暂停${getAutoRunLabel()}，等待邮箱后继续`;
+    displayStatus.textContent = currentAutoRun.phase === 'waiting_retry_confirm'
+      ? `自动已暂停${getAutoRunLabel()}，等待你确认是否继续重试`
+      : `自动已暂停${getAutoRunLabel()}，等待邮箱后继续`;
     statusBar.classList.add('paused');
     return;
   }
@@ -3005,8 +3324,8 @@ function updateStatusDisplay(state) {
     .map(([k]) => Number(k))
     .sort((a, b) => b - a)[0];
 
-  if (lastCompleted === 9) {
-    displayStatus.textContent = (state.stepStatuses[9] === 'manual_completed' || state.stepStatuses[9] === 'skipped') ? '全部步骤已跳过/完成' : '全部步骤已完成';
+  if (lastCompleted === 10) {
+    displayStatus.textContent = (state.stepStatuses[10] === 'manual_completed' || state.stepStatuses[10] === 'skipped') ? '全部步骤已跳过/完成' : '全部步骤已完成';
     statusBar.classList.add('completed');
   } else if (lastCompleted) {
     displayStatus.textContent = (state.stepStatuses[lastCompleted] === 'manual_completed' || state.stepStatuses[lastCompleted] === 'skipped')
@@ -3444,6 +3763,7 @@ async function fetchGeneratedEmail(options = {}) {
     }
 
     inputEmail.value = response.email;
+    resetCloudflareTempEmailLatestSummary();
     if (getSelectedEmailGenerator() === 'icloud') {
       queueIcloudAliasRefresh();
     }
@@ -3457,6 +3777,54 @@ async function fetchGeneratedEmail(options = {}) {
   } finally {
     btnFetchEmail.disabled = false;
     btnFetchEmail.textContent = defaultLabel;
+  }
+}
+
+async function readCloudflareTempEmailLatestCode() {
+  if (!btnTempEmailReadLatest) {
+    return;
+  }
+
+  const defaultLabel = '读取验证码';
+  btnTempEmailReadLatest.disabled = true;
+  btnTempEmailReadLatest.textContent = '读取中...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'READ_CLOUDFLARE_TEMP_EMAIL_LATEST_CODE',
+      source: 'sidepanel',
+      payload: {
+        address: inputEmail.value.trim(),
+      },
+    });
+
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+
+    latestCloudflareTempEmailReadResult = response || {};
+    renderCloudflareTempEmailLatestSummary();
+
+    if (response?.latestCode) {
+      await copyTextToClipboard(response.latestCode);
+      showToast(`已复制 Cloudflare Temp Email 最新验证码 ${response.latestCode}（${response.address}）`, 'success', 2800);
+      return;
+    }
+
+    if (response?.latestSubject) {
+      showToast(`最新邮件没有验证码：${response.latestSubject}`, 'warn', 3200);
+      return;
+    }
+
+    showToast(`当前邮箱 ${response?.address || getCloudflareTempEmailReadTarget() || '未指定'} 暂无邮件`, 'warn', 2600);
+  } catch (err) {
+    if (displayTempEmailLatest) {
+      displayTempEmailLatest.textContent = err.message;
+    }
+    showToast(`读取 Cloudflare Temp Email 失败：${err.message}`, 'error');
+  } finally {
+    btnTempEmailReadLatest.textContent = defaultLabel;
+    updateMailProviderUI();
   }
 }
 
@@ -3757,6 +4125,10 @@ btnFetchEmail.addEventListener('click', async () => {
     return;
   }
   await fetchGeneratedEmail().catch(() => { });
+});
+
+btnTempEmailReadLatest?.addEventListener('click', async () => {
+  await readCloudflareTempEmailLatestCode();
 });
 
 btnIcloudRefresh?.addEventListener('click', async () => {
@@ -4187,6 +4559,7 @@ btnAutoRun.addEventListener('click', async () => {
     const totalRuns = getRunCountValue();
     let mode = 'restart';
     const autoRunSkipFailures = inputAutoSkipFailures.checked;
+    const autoRetryMode = normalizeAutoRetryMode(selectAutoRetryMode?.value);
     const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
       inputAutoSkipFailuresThreadIntervalMinutes.value
     );
@@ -4228,6 +4601,7 @@ btnAutoRun.addEventListener('click', async () => {
         totalRuns,
         delayMinutes,
         autoRunSkipFailures,
+        autoRetryMode,
         mode,
       },
     });
@@ -4321,6 +4695,7 @@ btnReset.addEventListener('click', async () => {
   displayLocalhostUrl.textContent = '等待中...';
   displayLocalhostUrl.classList.remove('has-value');
   inputEmail.value = '';
+  resetCloudflareTempEmailLatestSummary();
   displayStatus.textContent = '就绪';
   statusBar.className = 'status-bar';
   logArea.innerHTML = '';
@@ -4372,8 +4747,12 @@ inputEmail.addEventListener('change', async () => {
   } catch (err) {
     showToast(err.message, 'error');
   }
+  resetCloudflareTempEmailLatestSummary();
 });
-inputEmail.addEventListener('input', updateButtonStates);
+inputEmail.addEventListener('input', () => {
+  resetCloudflareTempEmailLatestSummary();
+  updateButtonStates();
+});
 inputVpsUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -4398,6 +4777,32 @@ inputVpsPassword.addEventListener('blur', () => {
   input?.addEventListener('blur', () => {
     saveSettings({ silent: true }).catch(() => { });
   });
+});
+
+[inputHeroSmsBaseUrl, inputHeroSmsApiKey, inputHeroSmsService, inputHeroSmsCountry].forEach((input) => {
+  input?.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+});
+
+inputHeroSmsBaseUrl?.addEventListener('blur', () => {
+  inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(inputHeroSmsBaseUrl.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsApiKey?.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsService?.addEventListener('blur', () => {
+  inputHeroSmsService.value = normalizeHeroSmsServiceValue(inputHeroSmsService.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsCountry?.addEventListener('blur', () => {
+  inputHeroSmsCountry.value = normalizeHeroSmsCountryValue(inputHeroSmsCountry.value);
+  saveSettings({ silent: true }).catch(() => { });
 });
 
 [inputLuckmailApiKey, inputLuckmailBaseUrl, inputLuckmailDomain].forEach((input) => {
@@ -4467,6 +4872,31 @@ btnLuckmailBulkEnable?.addEventListener('click', async () => {
   await runBulkLuckmailAction('enable');
 });
 
+btnHeroSmsResend?.addEventListener('click', async () => {
+  if (heroSmsActionInFlight) {
+    return;
+  }
+
+  heroSmsActionInFlight = true;
+  updateHeroSmsResendButtonState();
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'HERO_SMS_RESEND_CODE',
+      source: 'sidepanel',
+      payload: {},
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    showToast('已请求 HeroSMS 重发验证码。', 'success', 1800);
+  } catch (err) {
+    showToast(`HeroSMS 重发失败：${err.message}`, 'error');
+  } finally {
+    heroSmsActionInFlight = false;
+    updateHeroSmsResendButtonState();
+  }
+});
+
 inputPassword.addEventListener('input', () => {
   markSettingsDirty(true);
   updateButtonStates();
@@ -4498,6 +4928,7 @@ selectMailProvider.addEventListener('change', async () => {
   if (nextProvider === LUCKMAIL_PROVIDER) {
     queueLuckmailPurchaseRefresh();
   }
+  resetCloudflareTempEmailLatestSummary();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -4529,6 +4960,7 @@ mail2925ModeButtons.forEach((button) => {
 selectEmailGenerator.addEventListener('change', () => {
   updateMailProviderUI();
   clearRegistrationEmail({ silent: true }).catch(() => { });
+  resetCloudflareTempEmailLatestSummary();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -4560,14 +4992,6 @@ selectCfDomain.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
-selectTempEmailDomain.addEventListener('change', () => {
-  if (selectTempEmailDomain.disabled) {
-    return;
-  }
-  markSettingsDirty(true);
-  saveSettings({ silent: true }).catch(() => { });
-});
-
 btnCfDomainMode.addEventListener('click', async () => {
   try {
     if (!cloudflareDomainEditMode) {
@@ -4589,27 +5013,6 @@ btnCfDomainMode.addEventListener('click', async () => {
   }
 });
 
-btnTempEmailDomainMode.addEventListener('click', async () => {
-  try {
-    if (!cloudflareTempEmailDomainEditMode) {
-      setCloudflareTempEmailDomainEditMode(true, { clearInput: true });
-      return;
-    }
-
-    const newDomain = normalizeCloudflareTempEmailDomainValue(inputTempEmailDomain.value);
-    if (!newDomain) {
-      showToast('请输入有效的 Cloudflare Temp Email 域名。', 'warn');
-      inputTempEmailDomain.focus();
-      return;
-    }
-
-    const { domains } = getCloudflareTempEmailDomainsFromState();
-    await saveCloudflareTempEmailDomainSettings([...domains, newDomain], newDomain);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-});
-
 inputCfDomain.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -4620,8 +5023,39 @@ inputCfDomain.addEventListener('keydown', (event) => {
 inputTempEmailDomain.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
-    btnTempEmailDomainMode.click();
+    saveSettings({ silent: true }).catch(() => { });
   }
+});
+
+inputTempEmailDomain.addEventListener('input', () => {
+  markSettingsDirty(true);
+});
+inputTempEmailDomain.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+checkboxTempEmailUseSubdomain?.addEventListener('change', () => {
+  if (inputTempEmailSubdomain) {
+    inputTempEmailSubdomain.disabled = !checkboxTempEmailUseSubdomain.checked;
+    if (!checkboxTempEmailUseSubdomain.checked) {
+      inputTempEmailSubdomain.value = '';
+    }
+  }
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputTempEmailSubdomain?.addEventListener('input', () => {
+  markSettingsDirty(true);
+});
+inputTempEmailSubdomain?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveSettings({ silent: true }).catch(() => { });
+  }
+});
+inputTempEmailSubdomain?.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
 });
 
 inputSub2ApiUrl.addEventListener('input', () => {
@@ -4707,9 +5141,15 @@ inputAutoSkipFailures.addEventListener('change', async () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+selectAutoRetryMode?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputTempEmailBaseUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
+  updateMailProviderUI();
 });
 inputTempEmailBaseUrl.addEventListener('blur', () => {
   inputTempEmailBaseUrl.value = normalizeCloudflareTempEmailBaseUrlValue(inputTempEmailBaseUrl.value);
@@ -4719,6 +5159,7 @@ inputTempEmailBaseUrl.addEventListener('blur', () => {
 inputTempEmailAdminAuth.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
+  updateMailProviderUI();
 });
 inputTempEmailAdminAuth.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
@@ -4727,6 +5168,7 @@ inputTempEmailAdminAuth.addEventListener('blur', () => {
 inputTempEmailCustomAuth.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
+  updateMailProviderUI();
 });
 inputTempEmailCustomAuth.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
@@ -4735,9 +5177,12 @@ inputTempEmailCustomAuth.addEventListener('blur', () => {
 inputTempEmailReceiveMailbox.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
+  resetCloudflareTempEmailLatestSummary();
+  updateMailProviderUI();
 });
 inputTempEmailReceiveMailbox.addEventListener('blur', () => {
   inputTempEmailReceiveMailbox.value = normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value);
+  resetCloudflareTempEmailLatestSummary();
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -4777,6 +5222,15 @@ inputAutoStepDelaySeconds.addEventListener('input', () => {
 });
 inputAutoStepDelaySeconds.addEventListener('blur', () => {
   syncAutoStepDelayInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputAutoSkipSteps?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputAutoSkipSteps?.addEventListener('blur', () => {
+  inputAutoSkipSteps.value = formatAutoSkipStepsValue(inputAutoSkipSteps.value);
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -4854,6 +5308,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       displayLocalhostUrl.textContent = '等待中...';
       displayLocalhostUrl.classList.remove('has-value');
       inputEmail.value = '';
+      resetCloudflareTempEmailLatestSummary();
       displayStatus.textContent = '就绪';
       statusBar.className = 'status-bar';
       logArea.innerHTML = '';
@@ -4876,6 +5331,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         autoRunCountdownNote: '',
       });
       applyAutoRunStatus(currentAutoRun);
+      renderHeroSmsPanel(latestState);
       updateProgressCounter();
       updateButtonStates();
       renderHotmailAccounts();
@@ -4884,6 +5340,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'DATA_UPDATED': {
       syncLatestState(message.payload);
+      if (
+        message.payload.email !== undefined
+        || message.payload.cloudflareTempEmailReceiveMailbox !== undefined
+        || message.payload.cloudflareTempEmailBaseUrl !== undefined
+      ) {
+        resetCloudflareTempEmailLatestSummary();
+      }
       if (message.payload.email !== undefined) {
         inputEmail.value = message.payload.email || '';
       }
@@ -4917,7 +5380,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputTempEmailReceiveMailbox.value = message.payload.cloudflareTempEmailReceiveMailbox || '';
       }
       if (message.payload.cloudflareTempEmailDomain !== undefined || message.payload.cloudflareTempEmailDomains !== undefined) {
-        renderCloudflareTempEmailDomainOptions(message.payload.cloudflareTempEmailDomain || latestState?.cloudflareTempEmailDomain || '');
+        inputTempEmailDomain.value = message.payload.cloudflareTempEmailDomain
+          || normalizeCloudflareTempEmailDomainValue(Array.isArray(message.payload.cloudflareTempEmailDomains) ? message.payload.cloudflareTempEmailDomains[0] : '')
+          || latestState?.cloudflareTempEmailDomain
+          || '';
+      }
+      if (message.payload.cloudflareTempEmailUseSubdomain !== undefined && checkboxTempEmailUseSubdomain) {
+        checkboxTempEmailUseSubdomain.checked = Boolean(message.payload.cloudflareTempEmailUseSubdomain);
+      }
+      if (message.payload.cloudflareTempEmailSubdomain !== undefined && inputTempEmailSubdomain) {
+        inputTempEmailSubdomain.value = message.payload.cloudflareTempEmailSubdomain || '';
+      }
+      if (
+        (message.payload.cloudflareTempEmailUseSubdomain !== undefined
+          || message.payload.cloudflareTempEmailSubdomain !== undefined)
+        && inputTempEmailSubdomain
+      ) {
+        inputTempEmailSubdomain.disabled = !Boolean(checkboxTempEmailUseSubdomain?.checked);
+      }
+      if (message.payload.heroSmsBaseUrl !== undefined) {
+        inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(message.payload.heroSmsBaseUrl);
+      }
+      if (message.payload.heroSmsApiKey !== undefined) {
+        inputHeroSmsApiKey.value = message.payload.heroSmsApiKey || '';
+      }
+      if (message.payload.heroSmsService !== undefined) {
+        inputHeroSmsService.value = message.payload.heroSmsService || '';
+      }
+      if (message.payload.heroSmsCountry !== undefined) {
+        inputHeroSmsCountry.value = message.payload.heroSmsCountry || '';
       }
       if (message.payload.currentHotmailAccountId !== undefined || message.payload.hotmailAccounts !== undefined) {
         renderHotmailAccounts();
@@ -4957,6 +5448,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputAutoSkipFailures.checked = Boolean(message.payload.autoRunSkipFailures);
         updateFallbackThreadIntervalInputState();
       }
+      if (message.payload.autoRetryMode !== undefined && selectAutoRetryMode) {
+        selectAutoRetryMode.value = normalizeAutoRetryMode(message.payload.autoRetryMode);
+      }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);
         updateAutoDelayInputState();
@@ -4973,6 +5467,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.autoStepDelaySeconds !== undefined) {
         inputAutoStepDelaySeconds.value = formatAutoStepDelayInputValue(message.payload.autoStepDelaySeconds);
       }
+      if (message.payload.autoSkipSteps !== undefined && inputAutoSkipSteps) {
+        inputAutoSkipSteps.value = formatAutoSkipStepsValue(message.payload.autoSkipSteps);
+      }
+      renderHeroSmsPanel(latestState);
       break;
     }
 
@@ -4993,7 +5491,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'AUTO_RUN_STATUS': {
       syncLatestState({
-        autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(message.payload.phase),
+        autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_retry_confirm', 'retrying', 'waiting_interval'].includes(message.payload.phase),
         autoRunPhase: message.payload.phase,
         autoRunCurrentRun: message.payload.currentRun,
         autoRunTotalRuns: message.payload.totalRuns,
@@ -5074,4 +5572,9 @@ restoreState().then(() => {
   updatePanelModeUI();
   updateButtonStates();
   updateStatusDisplay(latestState);
+  renderHeroSmsPanel(latestState);
 });
+
+setInterval(() => {
+  renderHeroSmsPanel(latestState);
+}, 1000);

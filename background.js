@@ -58,6 +58,7 @@ const {
 const {
   DEFAULT_MAIL_PAGE_SIZE: CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE,
   buildCloudflareTempEmailHeaders,
+  deriveCloudflareTempEmailRootDomain,
   getCloudflareTempEmailAddressFromResponse,
   joinCloudflareTempEmailUrl,
   normalizeCloudflareTempEmailAddress,
@@ -131,6 +132,18 @@ const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
 const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
+const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
+const HERO_SMS_NUMBER_MAX_USES = 5;
+const HERO_SMS_ACTIVATION_TTL_MS = 20 * 60 * 1000;
+const HERO_SMS_SMS_POLL_INTERVAL_MS = 5000;
+const HERO_SMS_SMS_TIMEOUT_MS = 180000;
+const HERO_SMS_RESEND_AFTER_MS = 60000;
+const DEFAULT_AUTO_RETRY_MODE = 'retry';
+const HERO_SMS_SERVICE_ALIASES = {
+  openai: 'dr',
+  chatgpt: 'dr',
+  claude: 'acz',
+};
 const DEFAULT_LUCKMAIL_PROJECT_CODE = 'openai';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
@@ -138,6 +151,9 @@ const PERSISTENT_ALIAS_STATE_KEYS = ['manualAliasUsage', 'preservedAliases'];
 
 initializeSessionStorageAccess();
 setupDeclarativeNetRequestRules();
+reconcileHeroSmsFailedActivationCleanupAlarms().catch((err) => {
+  console.warn(LOG_PREFIX, 'Failed to reconcile HeroSMS failed cleanup alarms:', err?.message || err);
+});
 
 function setupDeclarativeNetRequestRules() {
   if (!chrome.declarativeNetRequest?.updateDynamicRules) {
@@ -185,6 +201,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunDelayEnabled: false,
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,
+  autoSkipSteps: [],
+  autoRetryMode: DEFAULT_AUTO_RETRY_MODE,
   mailProvider: '163',
   mail2925Mode: DEFAULT_MAIL_2925_MODE,
   emailGenerator: 'duck',
@@ -196,6 +214,14 @@ const PERSISTED_SETTING_DEFAULTS = {
   hotmailServiceMode: HOTMAIL_SERVICE_MODE_LOCAL,
   hotmailRemoteBaseUrl: DEFAULT_HOTMAIL_REMOTE_BASE_URL,
   hotmailLocalBaseUrl: DEFAULT_HOTMAIL_LOCAL_BASE_URL,
+  heroSmsBaseUrl: DEFAULT_HERO_SMS_BASE_URL,
+  heroSmsApiKey: '',
+  heroSmsService: '',
+  heroSmsCountry: '',
+  luckmailApiKey: '',
+  luckmailBaseUrl: DEFAULT_LUCKMAIL_BASE_URL,
+  luckmailEmailType: DEFAULT_LUCKMAIL_EMAIL_TYPE,
+  luckmailDomain: '',
   cloudflareDomain: '',
   cloudflareDomains: [],
   cloudflareTempEmailBaseUrl: '',
@@ -204,6 +230,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailReceiveMailbox: '',
   cloudflareTempEmailDomain: '',
   cloudflareTempEmailDomains: [],
+  cloudflareTempEmailUseSubdomain: false,
+  cloudflareTempEmailSubdomain: '',
   hotmailAccounts: [],
 };
 
@@ -211,7 +239,10 @@ const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
 const ACCOUNT_RUN_HISTORY_STORAGE_KEY = 'accountRunHistory';
 const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
-const STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS = 25000;
+const STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS = 10000;
+const HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT = 3;
+const HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS = 2 * 60 * 1000;
+const HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX = 'hero-sms-failed-cleanup:';
 const PRE_LOGIN_COOKIE_CLEAR_DOMAINS = [
   'chatgpt.com',
   'chat.openai.com',
@@ -233,7 +264,7 @@ const DEFAULT_STATE = {
   currentStep: 0, // 当前流程执行到的步骤编号。
   stepStatuses: {
     1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending', // 运行时步骤状态映射，不要手动预填。
-    6: 'pending', 7: 'pending', 8: 'pending', 9: 'pending',
+    6: 'pending', 7: 'pending', 8: 'pending', 9: 'pending', 10: 'pending',
   },
   oauthUrl: null, // 运行时抓取到的 OAuth 地址，不要手动预填。
   email: null, // 运行时邮箱，由程序自动获取并写入，不能手动预填。
@@ -258,6 +289,12 @@ const DEFAULT_STATE = {
   luckmailBaseUrl: DEFAULT_LUCKMAIL_BASE_URL,
   luckmailEmailType: DEFAULT_LUCKMAIL_EMAIL_TYPE,
   luckmailDomain: '',
+  currentHeroSmsActivation: null,
+  heroSmsLastCode: '',
+  heroSmsRuntimeStatus: '',
+  heroSmsFailedActivations: [],
+  heroSmsPendingSuccessActivationId: 0,
+  autoRunResumeFreshAttempt: false,
   luckmailUsedPurchases: {},
   luckmailPreserveTagId: 0,
   luckmailPreserveTagName: DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME,
@@ -325,6 +362,140 @@ function normalizeAutoStepDelaySeconds(value, fallback = null) {
   );
 }
 
+function normalizeAutoSkipSteps(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? '')
+      .split(/[,\s，、]+/);
+  const seen = new Set();
+  const steps = [];
+
+  for (const item of source) {
+    const numeric = Number(String(item ?? '').trim());
+    if (!Number.isInteger(numeric) || numeric < 1 || numeric > 10 || seen.has(numeric)) {
+      continue;
+    }
+    seen.add(numeric);
+    steps.push(numeric);
+  }
+
+  return steps.sort((left, right) => left - right);
+}
+
+function normalizeAutoRetryMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'pause'
+    ? 'pause'
+    : DEFAULT_AUTO_RETRY_MODE;
+}
+
+function normalizeHeroSmsBaseUrl(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HERO_SMS_BASE_URL;
+
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    parsed.search = '';
+    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return DEFAULT_HERO_SMS_BASE_URL;
+  }
+}
+
+function normalizeHeroSmsService(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return HERO_SMS_SERVICE_ALIASES[normalized] || normalized;
+}
+
+function normalizeHeroSmsCountry(value = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) return '';
+  if (!/^\d+$/.test(rawValue)) return '';
+  return String(Math.max(0, Number(rawValue)));
+}
+
+function normalizeHeroSmsActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const acquiredAt = Number(value.acquiredAt) || Date.now();
+  const expiresAt = Number(value.expiresAt) || (acquiredAt + HERO_SMS_ACTIVATION_TTL_MS);
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service),
+    country: normalizeHeroSmsCountry(value.country),
+    acquiredAt,
+    expiresAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    lastCode: String(value.lastCode || '').trim(),
+    lastStatus: String(value.lastStatus || '').trim(),
+    lastStatusAt: Number(value.lastStatusAt) || 0,
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+    releasedAt: Number(value.releasedAt) || 0,
+    releaseReason: String(value.releaseReason || '').trim(),
+  };
+}
+
+function normalizeHeroSmsFailedActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const failedAt = Number(value.failedAt) || Date.now();
+  const cleanupAt = Number(value.cleanupAt) || (failedAt + HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS);
+
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service),
+    country: normalizeHeroSmsCountry(value.country),
+    baseUrl: normalizeHeroSmsBaseUrl(value.baseUrl),
+    apiKey: String(value.apiKey || '').trim(),
+    acquiredAt: Number(value.acquiredAt) || 0,
+    expiresAt: Number(value.expiresAt) || 0,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+    failedAt,
+    cleanupAt,
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'scheduled').trim() || 'scheduled',
+    cleanupResponse: String(value.cleanupResponse || '').trim(),
+    cleanupError: String(value.cleanupError || '').trim(),
+    cleanupAttemptedAt: Number(value.cleanupAttemptedAt) || 0,
+    cleanupCompletedAt: Number(value.cleanupCompletedAt) || 0,
+  };
+}
+
+function normalizeHeroSmsFailedActivationList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = value
+    .map((item) => normalizeHeroSmsFailedActivation(item))
+    .filter(Boolean)
+    .sort((left, right) => (right.failedAt || 0) - (left.failedAt || 0));
+
+  return normalized.slice(0, 30);
+}
+
 function resolveLegacyAutoStepDelaySeconds(input = {}) {
   const hasLegacyMin = input.autoStepRandomDelayMinSeconds !== undefined;
   const hasLegacyMax = input.autoStepRandomDelayMaxSeconds !== undefined;
@@ -385,6 +556,7 @@ function normalizeAutoRunTimerPlan(plan) {
 
   const totalRuns = normalizeRunCount(plan.totalRuns);
   const autoRunSkipFailures = Boolean(plan.autoRunSkipFailures);
+  const autoRetryMode = normalizeAutoRetryMode(plan.autoRetryMode);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -401,6 +573,7 @@ function normalizeAutoRunTimerPlan(plan) {
       fireAt,
       totalRuns,
       autoRunSkipFailures,
+      autoRetryMode,
       mode,
       currentRun: 0,
       attemptRun: 0,
@@ -418,6 +591,7 @@ function normalizeAutoRunTimerPlan(plan) {
       fireAt,
       totalRuns,
       autoRunSkipFailures,
+      autoRetryMode,
       mode: 'restart',
       currentRun: normalizedCurrentRun,
       attemptRun: normalizedAttemptRun,
@@ -434,6 +608,7 @@ function normalizeAutoRunTimerPlan(plan) {
     fireAt,
     totalRuns,
     autoRunSkipFailures,
+    autoRetryMode,
     mode: 'restart',
     currentRun: normalizedCurrentRun,
     attemptRun: normalizedAttemptRun,
@@ -463,6 +638,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     fireAt: legacyScheduledAt,
     totalRuns: state.scheduledAutoRunPlan?.totalRuns ?? state.autoRunTotalRuns,
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
+    autoRetryMode: state.scheduledAutoRunPlan?.autoRetryMode ?? state.autoRetryMode,
     mode: state.scheduledAutoRunPlan?.mode,
   });
 }
@@ -525,6 +701,16 @@ function normalizeMailProvider(value = '') {
     default:
       return PERSISTED_SETTING_DEFAULTS.mailProvider;
   }
+}
+
+function normalizeCloudflareTempEmailSubdomainLabel(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 63);
 }
 
 function buildLuckmailSessionSettingsPayload(input = {}) {
@@ -671,6 +857,8 @@ function getCloudflareTempEmailConfig(state = {}) {
     receiveMailbox: normalizeCloudflareTempEmailReceiveMailbox(state.cloudflareTempEmailReceiveMailbox),
     domain: normalizeCloudflareTempEmailDomain(state.cloudflareTempEmailDomain),
     domains: normalizeCloudflareTempEmailDomains(state.cloudflareTempEmailDomains),
+    useSubdomain: Boolean(state.cloudflareTempEmailUseSubdomain),
+    subdomain: normalizeCloudflareTempEmailSubdomainLabel(state.cloudflareTempEmailSubdomain),
   };
 }
 
@@ -678,6 +866,625 @@ function normalizeCloudflareTempEmailReceiveMailbox(value = '') {
   const normalized = normalizeCloudflareTempEmailAddress(value);
   if (!normalized) return '';
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : '';
+}
+
+async function setHeroSmsCurrentActivationState(activation) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  await setState({ currentHeroSmsActivation: normalizedActivation });
+  broadcastDataUpdate({ currentHeroSmsActivation: normalizedActivation });
+  return normalizedActivation;
+}
+
+async function setHeroSmsRuntimeStatusState(status = '') {
+  const normalizedStatus = String(status || '').trim();
+  await setState({ heroSmsRuntimeStatus: normalizedStatus });
+  broadcastDataUpdate({ heroSmsRuntimeStatus: normalizedStatus });
+  return normalizedStatus;
+}
+
+function getHeroSmsFailedActivations(state = {}) {
+  return normalizeHeroSmsFailedActivationList(state.heroSmsFailedActivations);
+}
+
+async function setHeroSmsFailedActivationsState(list = []) {
+  const normalizedList = normalizeHeroSmsFailedActivationList(list);
+  await setState({ heroSmsFailedActivations: normalizedList });
+  broadcastDataUpdate({ heroSmsFailedActivations: normalizedList });
+  return normalizedList;
+}
+
+async function upsertHeroSmsFailedActivationState(entry) {
+  const normalizedEntry = normalizeHeroSmsFailedActivation(entry);
+  if (!normalizedEntry) {
+    return getHeroSmsFailedActivations(await getState());
+  }
+
+  const state = await getState();
+  const currentList = getHeroSmsFailedActivations(state);
+  const existingIndex = currentList.findIndex((item) => item.activationId === normalizedEntry.activationId);
+  if (existingIndex >= 0) {
+    currentList[existingIndex] = {
+      ...currentList[existingIndex],
+      ...normalizedEntry,
+    };
+  } else {
+    currentList.unshift(normalizedEntry);
+  }
+  return setHeroSmsFailedActivationsState(currentList);
+}
+
+async function mergeHeroSmsCurrentActivationState(patch = {}) {
+  const state = await getState();
+  const currentActivation = getCurrentHeroSmsActivation(state);
+  if (!currentActivation) {
+    return null;
+  }
+
+  return setHeroSmsCurrentActivationState({
+    ...currentActivation,
+    ...(patch || {}),
+  });
+}
+
+async function setHeroSmsLastCodeState(code = '') {
+  const normalizedCode = String(code || '').trim();
+  await setState({ heroSmsLastCode: normalizedCode });
+  broadcastDataUpdate({ heroSmsLastCode: normalizedCode });
+  return normalizedCode;
+}
+
+function ensureHeroSmsConfig(config) {
+  if (!config.baseUrl) {
+    throw new Error('HeroSMS API 地址为空或格式无效。');
+  }
+  if (!config.apiKey) {
+    throw new Error('HeroSMS API Key 为空。');
+  }
+  if (!config.service) {
+    throw new Error('HeroSMS 服务代码为空。');
+  }
+  if (!config.country) {
+    throw new Error('HeroSMS 国家代码为空。');
+  }
+  return config;
+}
+
+async function requestHeroSmsText(config, action, params = {}) {
+  ensureHeroSmsConfig(config);
+  const url = new URL(config.baseUrl);
+  url.searchParams.set('action', action);
+  url.searchParams.set('api_key', config.apiKey);
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === '') continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'text/plain, application/json;q=0.9, */*;q=0.8',
+      },
+    });
+  } catch (err) {
+    throw new Error(`HeroSMS 请求失败：${err.message}`);
+  }
+
+  const text = (await response.text()).trim();
+  if (!response.ok) {
+    throw new Error(`HeroSMS 请求失败：${text || `HTTP ${response.status}`}`);
+  }
+  if (!text) {
+    throw new Error(`HeroSMS ${action} 返回为空。`);
+  }
+  return text;
+}
+
+async function requestHeroSmsPayload(config, action, params = {}) {
+  const text = await requestHeroSmsText(config, action, params);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function parseHeroSmsNumberResponse(text = '') {
+  const parts = String(text || '').split(':');
+  if (parts.length >= 3 && parts[0] === 'ACCESS_NUMBER') {
+    return {
+      activationId: Number(parts[1]),
+      phoneNumber: parts.slice(2).join(':').trim(),
+    };
+  }
+  if (/UNPROCESSABLE_ENTITY:service:INVALID/i.test(text)) {
+    throw new Error(
+      'HeroSMS 服务代码无效（service:INVALID）。请在侧边栏填写真实的 service code，而不是服务名称。'
+      + ' 可先运行 `python scripts/herosms_demo.py services --api-key 你的Key` 查看可用服务代码。'
+      + ` 原始响应：${text}`
+    );
+  }
+  if (/UNPROCESSABLE_ENTITY:country:INVALID/i.test(text)) {
+    throw new Error(
+      'HeroSMS 国家代码无效（country:INVALID）。请填写 HeroSMS 文档里的数字国家代码。'
+      + ' 可先运行 `python scripts/herosms_demo.py countries --api-key 你的Key` 查看国家列表。'
+      + ` 原始响应：${text}`
+    );
+  }
+  throw new Error(`HeroSMS getNumber 返回异常：${text}`);
+}
+
+function extractHeroSmsErrorText(payload) {
+  if (typeof payload === 'string') {
+    return payload.trim();
+  }
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  return String(
+    payload.error
+    || payload.message
+    || payload.msg
+    || payload.description
+    || payload.detail
+    || payload.status_text
+    || ''
+  ).trim();
+}
+
+function parseHeroSmsNumberV2Response(payload) {
+  if (typeof payload === 'string') {
+    return parseHeroSmsNumberResponse(payload);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`HeroSMS getNumberV2 返回异常：${JSON.stringify(payload)}`);
+  }
+
+  const status = String(payload.status || payload.result || '').trim().toLowerCase();
+  if (status && status !== 'success' && status !== 'ok') {
+    const errorText = extractHeroSmsErrorText(payload) || JSON.stringify(payload);
+    if (/service:invalid/i.test(errorText)) {
+      throw new Error(
+        'HeroSMS 服务代码无效（service:INVALID）。OpenAI 在当前 herosms.txt 中对应的服务编号是 `dr`。'
+        + ` 原始响应：${errorText}`
+      );
+    }
+    if (/country:invalid/i.test(errorText)) {
+      throw new Error(`HeroSMS 国家代码无效（country:INVALID）。原始响应：${errorText}`);
+    }
+    throw new Error(`HeroSMS getNumberV2 返回异常：${errorText}`);
+  }
+
+  const container = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const activationId = Number(
+    container.activationId
+    ?? container.activation_id
+    ?? container.id
+    ?? container.orderId
+    ?? payload.activationId
+    ?? payload.activation_id
+    ?? payload.id
+  );
+  const phoneNumber = String(
+    container.phoneNumber
+    ?? container.phone_number
+    ?? container.number
+    ?? container.phone
+    ?? container.msisdn
+    ?? payload.phoneNumber
+    ?? payload.phone_number
+    ?? payload.number
+    ?? payload.phone
+    ?? ''
+  ).trim();
+
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    throw new Error(`HeroSMS getNumberV2 返回缺少号码或激活 ID：${JSON.stringify(payload)}`);
+  }
+
+  return {
+    activationId,
+    phoneNumber,
+  };
+}
+
+function parseHeroSmsStatusResponse(text = '') {
+  const [status, code = ''] = String(text || '').split(':', 2);
+  return {
+    status: String(status || '').trim(),
+    code: String(code || '').trim(),
+    raw: String(text || '').trim(),
+  };
+}
+
+function isHeroSmsDeliveredStatus(status = '') {
+  const normalized = String(status || '').trim().toUpperCase();
+  return normalized === 'STATUS_OK'
+    || normalized === 'STATUS_WAIT_RETRY'
+    || normalized === 'STATUS_WAIT_RESEND';
+}
+
+function extractHeroSmsDeliveredCode(status) {
+  const parsed = status && typeof status === 'object'
+    ? status
+    : parseHeroSmsStatusResponse(status);
+  if (!isHeroSmsDeliveredStatus(parsed?.status)) {
+    return '';
+  }
+
+  const codeText = String(parsed?.code || '').trim();
+  if (!codeText) {
+    return '';
+  }
+
+  const match = codeText.match(/\d{4,8}/);
+  return match ? match[0] : '';
+}
+
+async function heroSmsGetNumber(config, options = {}) {
+  const payload = await requestHeroSmsPayload(config, 'getNumberV2', {
+    service: config.service,
+    country: config.country,
+    operator: options.operator,
+    maxPrice: options.maxPrice,
+    fixedPrice: options.fixedPrice,
+    ref: options.ref,
+    phoneException: options.phoneException,
+  });
+  return parseHeroSmsNumberV2Response(payload);
+}
+
+async function heroSmsGetStatus(config, activationId) {
+  const text = await requestHeroSmsText(config, 'getStatus', { id: activationId });
+  return parseHeroSmsStatusResponse(text);
+}
+
+async function heroSmsSetStatus(config, activationId, status) {
+  return requestHeroSmsText(config, 'setStatus', { id: activationId, status });
+}
+
+async function heroSmsFinishActivation(config, activationId) {
+  return requestHeroSmsText(config, 'finishActivation', { id: activationId });
+}
+
+async function heroSmsCancelActivation(config, activationId) {
+  return requestHeroSmsText(config, 'cancelActivation', { id: activationId });
+}
+
+function isHeroSmsActivationReusable(state, activation) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) return false;
+  const config = getHeroSmsConfig(state);
+  return normalizedActivation.service === config.service
+    && normalizedActivation.country === config.country
+    && normalizedActivation.useCount < HERO_SMS_NUMBER_MAX_USES
+    && getHeroSmsActivationRemainingMs(normalizedActivation) > 0
+    && !normalizedActivation.releasedAt;
+}
+
+async function finalizeHeroSmsActivation(stateOrActivation, options = {}) {
+  const {
+    preferComplete = false,
+    releaseReason = '',
+    silent = false,
+  } = options;
+  const state = stateOrActivation && stateOrActivation.currentHeroSmsActivation !== undefined
+    ? stateOrActivation
+    : await getState();
+  const activation = stateOrActivation && stateOrActivation.activationId
+    ? normalizeHeroSmsActivation(stateOrActivation)
+    : getCurrentHeroSmsActivation(state);
+
+  if (!activation) {
+    return { ok: true, released: false };
+  }
+
+  const config = getHeroSmsConfig(state);
+  let releaseResponse = '';
+  let releaseMode = preferComplete || activation.useCount >= HERO_SMS_NUMBER_MAX_USES ? 'complete' : 'cancel';
+  try {
+    releaseResponse = releaseMode === 'complete'
+      ? await heroSmsFinishActivation(config, activation.activationId)
+      : await heroSmsCancelActivation(config, activation.activationId);
+  } catch (err) {
+    if (!silent) {
+      await addLog(`HeroSMS：释放号码 ${activation.phoneNumber} 失败：${err.message}`, 'warn');
+    }
+  }
+
+  await setHeroSmsCurrentActivationState(null);
+  await setHeroSmsLastCodeState('');
+  await setHeroSmsRuntimeStatusState(
+    activation.phoneNumber
+      ? `号码 ${activation.phoneNumber} 已${releaseMode === 'complete' ? '完成' : '释放'}`
+      : `HeroSMS 号码已${releaseMode === 'complete' ? '完成' : '释放'}`
+  );
+  if (!silent) {
+    await addLog(
+      `HeroSMS：已${releaseMode === 'complete' ? '完成' : '释放'}号码 ${activation.phoneNumber}${releaseResponse ? `（${releaseResponse}）` : ''}`,
+      'ok'
+    );
+  }
+
+  return {
+    ok: true,
+    released: true,
+    mode: releaseMode,
+    releaseResponse,
+  };
+}
+
+async function ensureHeroSmsActivationForFlow(state, options = {}) {
+  const currentState = state || await getState();
+  const config = ensureHeroSmsConfig(getHeroSmsConfig(currentState));
+  const currentActivation = getCurrentHeroSmsActivation(currentState);
+
+  if (currentActivation && isHeroSmsActivationReusable(currentState, currentActivation)) {
+    return currentActivation;
+  }
+
+  if (currentActivation) {
+    await finalizeHeroSmsActivation(currentState, {
+      preferComplete: currentActivation.useCount >= HERO_SMS_NUMBER_MAX_USES,
+      releaseReason: currentActivation.useCount >= HERO_SMS_NUMBER_MAX_USES ? 'max_uses_reached' : 'expired_or_replaced',
+      silent: false,
+    });
+  }
+
+  const acquired = await heroSmsGetNumber(config, options);
+  const activation = await setHeroSmsCurrentActivationState({
+    activationId: acquired.activationId,
+    phoneNumber: acquired.phoneNumber,
+    service: config.service,
+    country: config.country,
+    acquiredAt: Date.now(),
+    expiresAt: Date.now() + HERO_SMS_ACTIVATION_TTL_MS,
+    useCount: 0,
+    resendCount: 0,
+  });
+  await setHeroSmsLastCodeState('');
+  await setHeroSmsRuntimeStatusState(`已获取号码 ${activation.phoneNumber}`);
+  await addLog(`HeroSMS：已获取手机号 ${activation.phoneNumber}（ID ${activation.activationId}）`, 'ok');
+  return activation;
+}
+
+async function requestHeroSmsResendForCurrentActivation(options = {}) {
+  const state = await getState();
+  const config = ensureHeroSmsConfig(getHeroSmsConfig(state));
+  const activation = getCurrentHeroSmsActivation(state);
+  if (!activation) {
+    throw new Error('当前没有可重发验证码的 HeroSMS 号码。');
+  }
+
+  const response = await heroSmsSetStatus(config, activation.activationId, 3);
+  const nextActivation = await mergeHeroSmsCurrentActivationState({
+    resendCount: activation.resendCount + 1,
+    lastStatus: response,
+    lastStatusAt: Date.now(),
+  });
+
+  if (!options.silent) {
+    await addLog(`HeroSMS：已请求号码 ${activation.phoneNumber} 重发短信（${response}）`, 'warn');
+  }
+  await setHeroSmsRuntimeStatusState(`已请求重发短信（第 ${nextActivation?.resendCount || activation.resendCount + 1} 次）`);
+
+  return {
+    ok: true,
+    activation: nextActivation,
+    response,
+  };
+}
+
+async function moveHeroSmsActivationToFailedList(activation, reason, errorText = '') {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) {
+    return null;
+  }
+
+  const state = await getState();
+  const config = getHeroSmsConfig(state);
+  const failedEntry = normalizeHeroSmsFailedActivation({
+    ...normalizedActivation,
+    reason,
+    errorText,
+    failedAt: Date.now(),
+    cleanupAt: Date.now() + HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS,
+    status: 'scheduled',
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+  });
+
+  await upsertHeroSmsFailedActivationState(failedEntry);
+  await ensureHeroSmsFailedActivationCleanupAlarm(failedEntry);
+
+  const latestState = await getState();
+  const currentActivation = getCurrentHeroSmsActivation(latestState);
+  if (currentActivation && currentActivation.activationId === normalizedActivation.activationId) {
+    await setHeroSmsCurrentActivationState(null);
+  }
+  await setHeroSmsLastCodeState('');
+  await setHeroSmsRuntimeStatusState(`号码 ${normalizedActivation.phoneNumber} 已移入失败列表，等待 2 分钟后清理`);
+  return failedEntry;
+}
+
+async function cleanupHeroSmsFailedActivation(activationId) {
+  const state = await getState();
+  const failedList = getHeroSmsFailedActivations(state);
+  const target = failedList.find((item) => item.activationId === activationId);
+  if (!target) {
+    await clearHeroSmsFailedActivationCleanupAlarm(activationId);
+    return { ok: true, skipped: true, reason: 'not_found' };
+  }
+
+  const config = {
+    baseUrl: normalizeHeroSmsBaseUrl(target.baseUrl || state.heroSmsBaseUrl),
+    apiKey: String(target.apiKey || state.heroSmsApiKey || '').trim(),
+    service: normalizeHeroSmsService(target.service || state.heroSmsService),
+    country: normalizeHeroSmsCountry(target.country || state.heroSmsCountry),
+  };
+
+  const cleanupAttemptedAt = Date.now();
+  let nextPatch = {
+    cleanupAttemptedAt,
+    cleanupError: '',
+  };
+
+  try {
+    if (target.useCount > 0) {
+      const finishResponse = await heroSmsFinishActivation(config, target.activationId);
+      nextPatch = {
+        ...nextPatch,
+        status: 'completed',
+        cleanupResponse: finishResponse,
+        cleanupCompletedAt: Date.now(),
+      };
+      await addLog(`HeroSMS：失败列表号码 ${target.phoneNumber} 已按“完成激活”清理（已使用过）。`, 'ok');
+    } else {
+      try {
+        const cancelResponse = await heroSmsCancelActivation(config, target.activationId);
+        nextPatch = {
+          ...nextPatch,
+          status: 'cancelled',
+          cleanupResponse: cancelResponse,
+          cleanupCompletedAt: Date.now(),
+        };
+        await addLog(`HeroSMS：失败列表号码 ${target.phoneNumber} 已成功取消。`, 'ok');
+      } catch (cancelErr) {
+        const finishResponse = await heroSmsFinishActivation(config, target.activationId);
+        nextPatch = {
+          ...nextPatch,
+          status: 'completed',
+          cleanupResponse: finishResponse,
+          cleanupCompletedAt: Date.now(),
+          cleanupError: cancelErr.message,
+        };
+        await addLog(
+          `HeroSMS：失败列表号码 ${target.phoneNumber} 取消失败，已改为完成激活清理：${cancelErr.message}`,
+          'warn'
+        );
+      }
+    }
+  } catch (err) {
+    nextPatch = {
+      ...nextPatch,
+      status: 'cleanup_failed',
+      cleanupError: err.message,
+    };
+    await addLog(`HeroSMS：清理失败列表号码 ${target.phoneNumber} 失败：${err.message}`, 'warn');
+  }
+
+  await upsertHeroSmsFailedActivationState({
+    ...target,
+    ...nextPatch,
+  });
+  await clearHeroSmsFailedActivationCleanupAlarm(activationId);
+  return { ok: true, activationId, status: nextPatch.status };
+}
+
+async function waitForHeroSmsCode(state, activation, options = {}) {
+  const currentState = state || await getState();
+  const config = ensureHeroSmsConfig(getHeroSmsConfig(currentState));
+  let currentActivation = normalizeHeroSmsActivation(activation);
+  if (!currentActivation) {
+    throw new Error('HeroSMS 当前没有可用的激活记录。');
+  }
+
+  const pollIntervalMs = Number(options.pollIntervalMs) || HERO_SMS_SMS_POLL_INTERVAL_MS;
+  const timeoutMs = Number(options.timeoutMs) || HERO_SMS_SMS_TIMEOUT_MS;
+  const resendAfterMs = Number(options.resendAfterMs) || HERO_SMS_RESEND_AFTER_MS;
+  const excludeCodes = new Set((options.excludeCodes || []).map((item) => String(item || '').trim()).filter(Boolean));
+  const requestFreshCodeOnStart = Boolean(options.requestFreshCodeOnStart);
+  const resendCallback = typeof options.onResend === 'function' ? options.onResend : null;
+  const start = Date.now();
+  const maxResendAttempts = Math.max(
+    1,
+    Math.floor(
+      Number.isFinite(Number(options.maxResendAttempts))
+        ? Number(options.maxResendAttempts)
+        : Math.max(1, timeoutMs / Math.max(resendAfterMs, pollIntervalMs))
+    )
+  );
+  let resendAttempts = 0;
+  let nextResendAt = start + resendAfterMs;
+
+  if (options.markReady !== false) {
+    const readyResponse = await heroSmsSetStatus(config, currentActivation.activationId, 1);
+    currentActivation = await mergeHeroSmsCurrentActivationState({
+      lastStatus: readyResponse,
+      lastStatusAt: Date.now(),
+    }) || currentActivation;
+    await setHeroSmsRuntimeStatusState(`号码 ${currentActivation.phoneNumber} 已就绪，等待短信验证码`);
+  }
+
+  async function triggerResend(reason) {
+    if (resendAttempts >= maxResendAttempts) {
+      return false;
+    }
+
+    resendAttempts += 1;
+    if (resendCallback) {
+      try {
+        await resendCallback({
+          attempt: resendAttempts,
+          reason,
+          activation: currentActivation,
+        });
+      } catch (err) {
+        await addLog(`HeroSMS：第 ${resendAttempts} 次请求新短信失败：${err.message}`, 'warn');
+      }
+    } else {
+      try {
+        await requestHeroSmsResendForCurrentActivation({ silent: false });
+      } catch (err) {
+        await addLog(`HeroSMS：第 ${resendAttempts} 次请求新短信失败：${err.message}`, 'warn');
+      }
+    }
+
+    nextResendAt = Date.now() + resendAfterMs;
+    return true;
+  }
+
+  if (requestFreshCodeOnStart) {
+    await triggerResend('initial');
+  }
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+    const status = await heroSmsGetStatus(config, currentActivation.activationId);
+    currentActivation = await mergeHeroSmsCurrentActivationState({
+      lastStatus: status.raw,
+      lastStatusAt: Date.now(),
+    }) || currentActivation;
+
+    const deliveredCode = extractHeroSmsDeliveredCode(status);
+    if (deliveredCode && !excludeCodes.has(deliveredCode)) {
+      if (status.status !== 'STATUS_OK') {
+        await addLog(`HeroSMS：状态 ${status.status} 已返回可用验证码 ${deliveredCode}。`, 'ok');
+      }
+      await setHeroSmsLastCodeState(deliveredCode);
+      currentActivation = await mergeHeroSmsCurrentActivationState({
+        lastCode: deliveredCode,
+        lastStatus: status.raw,
+        lastStatusAt: Date.now(),
+      }) || currentActivation;
+      await setHeroSmsRuntimeStatusState(`已收到验证码 ${deliveredCode}`);
+      return {
+        ok: true,
+        code: deliveredCode,
+        raw: status.raw,
+      };
+    }
+
+    if (Date.now() >= nextResendAt && resendAttempts < maxResendAttempts) {
+      await triggerResend('timeout');
+    }
+
+    await sleepWithStop(pollIntervalMs);
+  }
+
+  throw new Error('HeroSMS 等待短信验证码超时。');
 }
 
 function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {}, config = getCloudflareTempEmailConfig(state)) {
@@ -719,12 +1526,16 @@ function normalizePersistentSettingValue(key, value) {
     case 'autoRunSkipFailures':
     case 'autoRunDelayEnabled':
       return Boolean(value);
+    case 'autoRetryMode':
+      return normalizeAutoRetryMode(value);
     case 'autoRunFallbackThreadIntervalMinutes':
       return normalizeAutoRunFallbackThreadIntervalMinutes(value);
     case 'autoRunDelayMinutes':
       return normalizeAutoRunDelayMinutes(value);
     case 'autoStepDelaySeconds':
       return normalizeAutoStepDelaySeconds(value, PERSISTED_SETTING_DEFAULTS.autoStepDelaySeconds);
+    case 'autoSkipSteps':
+      return normalizeAutoSkipSteps(value);
     case 'mailProvider':
       return normalizeMailProvider(value);
     case 'mail2925Mode':
@@ -747,6 +1558,22 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHotmailRemoteBaseUrl(value);
     case 'hotmailLocalBaseUrl':
       return normalizeHotmailLocalBaseUrl(value);
+    case 'heroSmsBaseUrl':
+      return normalizeHeroSmsBaseUrl(value);
+    case 'heroSmsApiKey':
+      return String(value || '');
+    case 'heroSmsService':
+      return normalizeHeroSmsService(value);
+    case 'heroSmsCountry':
+      return normalizeHeroSmsCountry(value);
+    case 'luckmailApiKey':
+      return String(value || '');
+    case 'luckmailBaseUrl':
+      return normalizeLuckmailBaseUrl(value);
+    case 'luckmailEmailType':
+      return normalizeLuckmailEmailType(value);
+    case 'luckmailDomain':
+      return String(value || '').trim();
     case 'cloudflareDomain':
       return normalizeCloudflareDomain(value);
     case 'cloudflareDomains':
@@ -762,6 +1589,10 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeCloudflareTempEmailDomain(value);
     case 'cloudflareTempEmailDomains':
       return normalizeCloudflareTempEmailDomains(value);
+    case 'cloudflareTempEmailUseSubdomain':
+      return Boolean(value);
+    case 'cloudflareTempEmailSubdomain':
+      return normalizeCloudflareTempEmailSubdomainLabel(value);
     case 'hotmailAccounts':
       return normalizeHotmailAccounts(value);
     default:
@@ -1013,7 +1844,7 @@ function buildSettingsExportFilename(date = new Date()) {
 }
 
 async function exportSettingsBundle() {
-  const settings = await getPersistedSettings();
+  const settings = buildPersistentSettingsPayload(await getState(), { fillDefaults: true });
   const bundle = {
     schemaVersion: SETTINGS_EXPORT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -1232,6 +2063,7 @@ async function setIcloudAliasPreservedState(payload = {}) {
 
 async function resetState() {
   console.log(LOG_PREFIX, 'Resetting all state');
+  await clearAllHeroSmsFailedActivationCleanupAlarms();
   // Preserve settings and persistent data across resets
   const [prev, persistedSettings, persistedAliasState] = await Promise.all([
     chrome.storage.session.get([
@@ -2794,6 +3626,134 @@ async function listCloudflareTempEmailMessages(state, options = {}) {
   return { config, messages };
 }
 
+async function inspectCloudflareTempEmailInbox(state, options = {}) {
+  const config = ensureCloudflareTempEmailConfig(state, { requireAdminAuth: true });
+  const targetEmail = resolveCloudflareTempEmailPollTargetEmail(state, {
+    targetEmail: options.targetEmail || options.address || options.email,
+  }, config);
+
+  if (!targetEmail) {
+    throw new Error('Cloudflare Temp Email 读取邮件前缺少目标邮箱地址，请先获取注册邮箱或填写“邮件接收”邮箱。');
+  }
+
+  const { messages } = await listCloudflareTempEmailMessages(state, {
+    address: targetEmail,
+    limit: Number(options.limit) || CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE,
+    offset: Number(options.offset) || 0,
+  });
+
+  const sortedMessages = [...messages].sort((left, right) => {
+    const leftTime = Date.parse(left.receivedDateTime || '') || 0;
+    const rightTime = Date.parse(right.receivedDateTime || '') || 0;
+    return rightTime - leftTime;
+  });
+  const latestMessage = sortedMessages[0] || null;
+
+  const verificationMatchResult = pickVerificationMessageWithTimeFallback(sortedMessages, {
+    afterTimestamp: Number(options.filterAfterTimestamp) || 0,
+    senderFilters: Array.isArray(options.senderFilters) && options.senderFilters.length
+      ? options.senderFilters
+      : ['openai', 'noreply', 'verify', 'auth', 'chatgpt', 'duckduckgo', 'forward'],
+    subjectFilters: Array.isArray(options.subjectFilters) && options.subjectFilters.length
+      ? options.subjectFilters
+      : ['verify', 'verification', 'code', 'confirm', 'login', '验证码', '注册码'],
+    excludeCodes: Array.isArray(options.excludeCodes) ? options.excludeCodes : [],
+  });
+
+  const matchedMessage = verificationMatchResult?.match?.message || null;
+  const codeSourceMessage = matchedMessage || latestMessage;
+  const latestCode = verificationMatchResult?.match?.code
+    || (codeSourceMessage ? extractVerificationCodeFromMessage(codeSourceMessage) : '')
+    || '';
+
+  return {
+    ok: true,
+    address: targetEmail,
+    messageCount: sortedMessages.length,
+    latestCode,
+    latestMailId: codeSourceMessage?.id || '',
+    latestSubject: codeSourceMessage?.subject || latestMessage?.subject || '',
+    latestFrom: codeSourceMessage?.from?.emailAddress?.address || latestMessage?.from?.emailAddress?.address || '',
+    latestPreview: String(codeSourceMessage?.bodyPreview || latestMessage?.bodyPreview || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+    latestReceivedAt: codeSourceMessage?.receivedDateTime || latestMessage?.receivedDateTime || '',
+    usedRelaxedFilters: Boolean(verificationMatchResult?.usedRelaxedFilters),
+    sample: summarizeCloudflareTempEmailMessagesForLog(sortedMessages),
+  };
+}
+
+function getHeroSmsConfig(state = {}) {
+  return {
+    baseUrl: normalizeHeroSmsBaseUrl(state.heroSmsBaseUrl),
+    apiKey: String(state.heroSmsApiKey || '').trim(),
+    service: normalizeHeroSmsService(state.heroSmsService),
+    country: normalizeHeroSmsCountry(state.heroSmsCountry),
+  };
+}
+
+function getCurrentHeroSmsActivation(state = {}) {
+  return normalizeHeroSmsActivation(state.currentHeroSmsActivation);
+}
+
+function getHeroSmsActivationRemainingMs(activation, now = Date.now()) {
+  const normalized = normalizeHeroSmsActivation(activation);
+  if (!normalized) return 0;
+  return Math.max(0, normalized.expiresAt - now);
+}
+
+function buildHeroSmsFailedActivationAlarmName(activationId) {
+  return `${HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX}${activationId}`;
+}
+
+async function ensureHeroSmsFailedActivationCleanupAlarm(activation) {
+  const normalized = normalizeHeroSmsFailedActivation(activation);
+  if (!normalized || !Number.isFinite(normalized.cleanupAt) || normalized.cleanupAt <= Date.now()) {
+    return false;
+  }
+
+  const alarmName = buildHeroSmsFailedActivationAlarmName(normalized.activationId);
+  const existingAlarm = await chrome.alarms.get(alarmName);
+  if (!existingAlarm || Math.abs((existingAlarm.scheduledTime || 0) - normalized.cleanupAt) > 1000) {
+    await chrome.alarms.clear(alarmName);
+    await chrome.alarms.create(alarmName, { when: normalized.cleanupAt });
+  }
+  return true;
+}
+
+async function clearHeroSmsFailedActivationCleanupAlarm(activationId) {
+  await chrome.alarms.clear(buildHeroSmsFailedActivationAlarmName(activationId));
+}
+
+async function clearAllHeroSmsFailedActivationCleanupAlarms() {
+  const alarms = await chrome.alarms.getAll();
+  const targets = (alarms || []).filter((alarm) => String(alarm?.name || '').startsWith(HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX));
+  await Promise.all(targets.map((alarm) => chrome.alarms.clear(alarm.name)));
+}
+
+async function reconcileHeroSmsFailedActivationCleanupAlarms() {
+  const state = await getState();
+  const failedList = getHeroSmsFailedActivations(state);
+  for (const item of failedList) {
+    if (item.cleanupCompletedAt || item.status === 'cancelled' || item.status === 'completed') {
+      await clearHeroSmsFailedActivationCleanupAlarm(item.activationId);
+      continue;
+    }
+    if (item.cleanupAt > Date.now()) {
+      await ensureHeroSmsFailedActivationCleanupAlarm(item);
+      continue;
+    }
+    await cleanupHeroSmsFailedActivation(item.activationId);
+  }
+}
+
+function isPhoneMaxUsageExceededErrorText(text = '') {
+  return /phone_max_usage_exceeded/i.test(String(text || '').trim());
+}
+
+function shouldRetryStep8WithFreshHeroSmsNumber(error) {
+  const text = String(error?.errorText || error?.message || error || '').trim();
+  return isPhoneMaxUsageExceededErrorText(text);
+}
+
 async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload = {}) {
   const config = ensureCloudflareTempEmailConfig(state, { requireAdminAuth: true });
   const targetEmail = resolveCloudflareTempEmailPollTargetEmail(state, pollPayload, config);
@@ -3344,6 +4304,13 @@ function isSignupPasswordPageUrl(rawUrl) {
   if (!parsed) return false;
   return isSignupPageHost(parsed.hostname)
     && /\/create-account\/password(?:[/?#]|$)/i.test(parsed.pathname || '');
+}
+
+function isSignupVerificationPageUrl(rawUrl) {
+  const parsed = parseUrlSafely(rawUrl);
+  if (!parsed) return false;
+  return isSignupPageHost(parsed.hostname)
+    && /\/email-verification(?:[/?#]|$)/i.test(parsed.pathname || '');
 }
 
 function is163MailHost(hostname = '') {
@@ -4216,7 +5183,7 @@ function isStepDoneStatus(status) {
 }
 
 function getFirstUnfinishedStep(statuses = {}) {
-  for (let step = 1; step <= 9; step++) {
+  for (let step = 1; step <= 10; step++) {
     if (!isStepDoneStatus(statuses[step] || 'pending')) {
       return step;
     }
@@ -4288,7 +5255,7 @@ async function invalidateDownstreamAfterStepRestart(step, options = {}) {
   const statuses = { ...(state.stepStatuses || {}) };
   const changedSteps = [];
 
-  for (let downstream = step + 1; downstream <= 9; downstream++) {
+  for (let downstream = step + 1; downstream <= 10; downstream++) {
     if (statuses[downstream] !== 'pending') {
       statuses[downstream] = 'pending';
       changedSteps.push(downstream);
@@ -4344,6 +5311,7 @@ function getAutoRunStatusPayload(phase, payload = {}) {
     || phase === 'running'
     || phase === 'waiting_step'
     || phase === 'waiting_email'
+    || phase === 'waiting_retry_confirm'
     || phase === 'retrying'
     || phase === 'waiting_interval';
 
@@ -4397,7 +5365,8 @@ function isAutoRunLockedState(state) {
 }
 
 function isAutoRunPausedState(state) {
-  return Boolean(state.autoRunning) && state.autoRunPhase === 'waiting_email';
+  return Boolean(state.autoRunning)
+    && (state.autoRunPhase === 'waiting_email' || state.autoRunPhase === 'waiting_retry_confirm');
 }
 
 function isAutoRunScheduledState(state) {
@@ -4480,6 +5449,7 @@ function getAutoRunTimerResumeOptions(plan) {
     return {
       loopOptions: {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+        autoRetryMode: normalizedPlan.autoRetryMode,
         mode: normalizedPlan.mode,
       },
       statusPayload: {
@@ -4495,6 +5465,7 @@ function getAutoRunTimerResumeOptions(plan) {
     return {
       loopOptions: {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+        autoRetryMode: normalizedPlan.autoRetryMode,
         mode: 'restart',
         resumeCurrentRun: nextRun,
         resumeAttemptRun: 1,
@@ -4511,6 +5482,7 @@ function getAutoRunTimerResumeOptions(plan) {
   return {
     loopOptions: {
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+      autoRetryMode: normalizedPlan.autoRetryMode,
       mode: 'restart',
       resumeCurrentRun: normalizedPlan.currentRun,
       resumeAttemptRun: normalizedPlan.attemptRun,
@@ -4616,6 +5588,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     fireAt: Date.now() + delayMinutes * 60 * 1000,
     totalRuns,
     autoRunSkipFailures: options.autoRunSkipFailures,
+    autoRetryMode: options.autoRetryMode,
     mode: options.mode,
   });
 
@@ -4625,6 +5598,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
 
   await persistAutoRunTimerPlan(timerPlan, {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
+    autoRetryMode: timerPlan.autoRetryMode,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, []),
   });
   await addLog(
@@ -4694,6 +5668,7 @@ async function restoreAutoRunTimerIfNeeded() {
     statusPayload,
     {
       autoRunSkipFailures: plan.autoRunSkipFailures,
+      autoRetryMode: plan.autoRetryMode,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
       autoRunTimerPlan: plan,
       scheduledAutoRunPlan: null,
@@ -4721,7 +5696,7 @@ async function ensureManualInteractionAllowed(actionLabel) {
 async function skipStep(step) {
   const state = await ensureManualInteractionAllowed('跳过步骤');
 
-  if (!Number.isInteger(step) || step < 1 || step > 9) {
+  if (!Number.isInteger(step) || step < 1 || step > 10) {
     throw new Error(`无效步骤：${step}`);
   }
 
@@ -4889,8 +5864,9 @@ async function handleMessage(message, sender) {
         notifyStepError(message.step, STOP_ERROR_MESSAGE);
         return { ok: true };
       }
-      await setStepStatus(message.step, 'completed');
-      await addLog(`步骤 ${message.step} 已完成`, 'ok');
+      const nextStatus = message.payload?.skipped ? 'skipped' : 'completed';
+      await setStepStatus(message.step, nextStatus);
+      await addLog(`步骤 ${message.step} 已${nextStatus === 'skipped' ? '跳过' : '完成'}`, nextStatus === 'skipped' ? 'warn' : 'ok');
       await handleStepData(message.step, message.payload);
       notifyStepComplete(message.step, message.payload);
       return { ok: true };
@@ -4956,9 +5932,10 @@ async function handleMessage(message, sender) {
       }
       const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
       const autoRunSkipFailures = Boolean(message.payload?.autoRunSkipFailures);
+      const autoRetryMode = normalizeAutoRetryMode(message.payload?.autoRetryMode);
       const mode = message.payload?.mode === 'continue' ? 'continue' : 'restart';
-      await setState({ autoRunSkipFailures });
-      startAutoRunLoop(totalRuns, { autoRunSkipFailures, mode });
+      await setState({ autoRunSkipFailures, autoRetryMode });
+      startAutoRunLoop(totalRuns, { autoRunSkipFailures, autoRetryMode, mode });
       return { ok: true };
     }
 
@@ -4968,6 +5945,7 @@ async function handleMessage(message, sender) {
       return await scheduleAutoRun(totalRuns, {
         delayMinutes: message.payload?.delayMinutes,
         autoRunSkipFailures: Boolean(message.payload?.autoRunSkipFailures),
+        autoRetryMode: normalizeAutoRetryMode(message.payload?.autoRetryMode),
         mode: message.payload?.mode,
       });
     }
@@ -5033,6 +6011,37 @@ async function handleMessage(message, sender) {
         ...sessionUpdates,
       });
       return { ok: true, state: await getState() };
+    }
+
+    case 'HERO_SMS_RESEND_CODE': {
+      const result = await requestHeroSmsResendForCurrentActivation({ silent: false });
+      const signupTabId = await getTabId('signup-page');
+      if (Number.isInteger(signupTabId)) {
+        try {
+          const phonePageState = await getPhoneVerificationPageState(signupTabId);
+          if (phonePageState?.addPhonePage && phonePageState?.hasCodeTarget) {
+            await triggerPhoneVerificationCodeResendOnPage(signupTabId);
+          }
+        } catch (err) {
+          console.warn(LOG_PREFIX, 'HeroSMS resend failed to click page resend button:', err?.message || err);
+        }
+      }
+      return { ok: true, ...result };
+    }
+
+    case 'HERO_SMS_RELEASE_NUMBER': {
+      const state = await getState();
+      const activation = getCurrentHeroSmsActivation(state);
+      if (!activation) {
+        return { ok: true, released: false };
+      }
+
+      const preferComplete = Boolean(message.payload?.preferComplete) || activation.useCount >= HERO_SMS_NUMBER_MAX_USES;
+      return await finalizeHeroSmsActivation(state, {
+        preferComplete,
+        releaseReason: String(message.payload?.releaseReason || '').trim(),
+        silent: false,
+      });
     }
 
     case 'EXPORT_SETTINGS': {
@@ -5168,6 +6177,15 @@ async function handleMessage(message, sender) {
       return { ok: true, email };
     }
 
+    case 'READ_CLOUDFLARE_TEMP_EMAIL_LATEST_CODE': {
+      clearStopRequest();
+      const state = await getState();
+      if (isAutoRunLockedState(state)) {
+        throw new Error('自动流程运行中，当前不能手动读取 Cloudflare Temp Email 邮件。');
+      }
+      return await inspectCloudflareTempEmailInbox(state, message.payload || {});
+    }
+
     case 'FETCH_DUCK_EMAIL': {
       clearStopRequest();
       const state = await getState();
@@ -5273,15 +6291,17 @@ async function handleStepData(step, payload) {
       });
       break;
     case 8:
+      break;
+    case 9:
       if (payload.localhostUrl) {
         if (!isLocalhostOAuthCallbackUrl(payload.localhostUrl)) {
-          throw new Error('步骤 8 返回了无效的 localhost OAuth 回调地址。');
+          throw new Error('步骤 9 返回了无效的 localhost OAuth 回调地址。');
         }
         await setState({ localhostUrl: payload.localhostUrl });
         broadcastDataUpdate({ localhostUrl: payload.localhostUrl });
       }
       break;
-    case 9: {
+    case 10: {
       if (payload.localhostUrl) {
         await closeLocalhostCallbackTabs(payload.localhostUrl);
       }
@@ -5301,6 +6321,39 @@ async function handleStepData(step, payload) {
         }
         await clearLuckmailRuntimeState({ clearEmail: true });
         await addLog('当前 LuckMail 邮箱运行态已清空，下轮将优先复用未用邮箱或重新购买邮箱。', 'ok');
+      }
+      const currentHeroSmsActivation = getCurrentHeroSmsActivation(latestState);
+      const pendingHeroSmsActivationId = Number(latestState.heroSmsPendingSuccessActivationId) || 0;
+      if (currentHeroSmsActivation && pendingHeroSmsActivationId === currentHeroSmsActivation.activationId) {
+        const nextUseCount = currentHeroSmsActivation.useCount + 1;
+        const updatedActivation = await setHeroSmsCurrentActivationState({
+          ...currentHeroSmsActivation,
+          useCount: nextUseCount,
+        });
+        const expired = getHeroSmsActivationRemainingMs(updatedActivation) <= 0;
+
+        if (nextUseCount >= HERO_SMS_NUMBER_MAX_USES || expired) {
+          await addLog(
+            `HeroSMS：号码 ${updatedActivation.phoneNumber} 已成功使用 ${nextUseCount}/${HERO_SMS_NUMBER_MAX_USES} 次，准备${nextUseCount >= HERO_SMS_NUMBER_MAX_USES ? '完成激活' : '释放号码'}。`,
+            'ok'
+          );
+          await finalizeHeroSmsActivation(
+            { ...latestState, currentHeroSmsActivation: updatedActivation },
+            {
+              preferComplete: nextUseCount >= HERO_SMS_NUMBER_MAX_USES,
+              releaseReason: nextUseCount >= HERO_SMS_NUMBER_MAX_USES ? 'max_uses_reached' : 'expired_after_success',
+              silent: false,
+            }
+          );
+        } else {
+          await addLog(
+            `HeroSMS：号码 ${updatedActivation.phoneNumber} 已累计成功注册 ${nextUseCount}/${HERO_SMS_NUMBER_MAX_USES} 次，剩余 ${HERO_SMS_NUMBER_MAX_USES - nextUseCount} 次可复用。`,
+            'ok'
+          );
+        }
+      }
+      if (pendingHeroSmsActivationId) {
+        await setState({ heroSmsPendingSuccessActivationId: 0 });
       }
       const localhostPrefix = buildLocalhostCleanupPrefix(payload.localhostUrl);
       if (localhostPrefix) {
@@ -5326,8 +6379,8 @@ async function handleStepData(step, payload) {
 const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
-const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([1, 2, 4, 6, 7, 8]);
-const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 9]);
+const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([1, 2, 4, 6, 7, 8, 9]);
+const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 10]);
 
 function waitForStepComplete(step, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -5494,6 +6547,7 @@ async function requestStop(options = {}) {
       attemptRun: timerPlan.attemptRun,
     }, {
       autoRunSkipFailures: timerPlan.autoRunSkipFailures,
+      autoRetryMode: timerPlan.autoRetryMode,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, timerPlan.roundSummaries),
       autoRunTimerPlan: null,
       scheduledAutoRunPlan: null,
@@ -5543,11 +6597,16 @@ async function executeStep(step, options = {}) {
   const { deferRetryableTransportError = false } = options;
   console.log(LOG_PREFIX, `Executing step ${step}`);
   throwIfStopped();
+  const state = await getState();
+  const configuredSkipSteps = normalizeAutoSkipSteps(state.autoSkipSteps);
+  if (configuredSkipSteps.includes(step)) {
+    await setStepStatus(step, 'skipped');
+    await addLog(`步骤 ${step} 已按“跳过步骤”配置自动跳过。`, 'warn');
+    return;
+  }
   await setStepStatus(step, 'running');
   await addLog(`步骤 ${step} 开始执行`);
   await humanStepDelay();
-
-  const state = await getState();
 
   // Set flow start time on first step
   if (step === 1 && !state.flowStartTime) {
@@ -5565,6 +6624,7 @@ async function executeStep(step, options = {}) {
       case 7: await executeStep7(state); break;
       case 8: await executeStep8(state); break;
       case 9: await executeStep9(state); break;
+      case 10: await executeStep10(state); break;
       default:
         throw new Error(`未知步骤：${step}`);
     }
@@ -5677,7 +6737,6 @@ async function fetchCloudflareEmail(state, options = {}) {
 function ensureCloudflareTempEmailConfig(state, options = {}) {
   const {
     requireAdminAuth = false,
-    requireDomain = false,
   } = options;
   const config = getCloudflareTempEmailConfig(state);
   if (!config.baseUrl) {
@@ -5686,10 +6745,66 @@ function ensureCloudflareTempEmailConfig(state, options = {}) {
   if (requireAdminAuth && !config.adminAuth) {
     throw new Error('Cloudflare Temp Email 缺少 Admin Auth。');
   }
-  if (requireDomain && !config.domain) {
-    throw new Error('Cloudflare Temp Email 域名为空或格式无效。');
-  }
   return config;
+}
+
+function generateCloudflareTempEmailSubdomainLabel() {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const chars = [];
+  const letterCount = 6 + Math.floor(Math.random() * 3);
+  const digitCount = 1 + Math.floor(Math.random() * 3);
+
+  for (let i = 0; i < letterCount; i++) {
+    chars.push(letters[Math.floor(Math.random() * letters.length)]);
+  }
+  for (let i = 0; i < digitCount; i++) {
+    chars.push(digits[Math.floor(Math.random() * digits.length)]);
+  }
+
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+
+  return chars.join('');
+}
+
+function isCloudflareTempEmailHtmlResponse(text) {
+  const value = String(text || '').trimStart().toLowerCase();
+  return value.startsWith('<!doctype html') || value.startsWith('<html');
+}
+
+function resolveCloudflareTempEmailRequestDomain(config, options = {}) {
+  const explicitDomain = normalizeCloudflareTempEmailDomain(options.domain || config.domain);
+  const inferredRootDomain = normalizeCloudflareTempEmailDomain(
+    deriveCloudflareTempEmailRootDomain(config.baseUrl)
+  );
+  const rootDomain = explicitDomain || inferredRootDomain;
+  if (!rootDomain) {
+    throw new Error('Cloudflare Temp Email 未配置域名，且无法从 Worker 地址自动推导根域名。');
+  }
+
+  const useSubdomain = options.useSubdomain !== undefined
+    ? Boolean(options.useSubdomain)
+    : Boolean(config.useSubdomain);
+  if (!useSubdomain) {
+    return {
+      domain: rootDomain,
+      mode: explicitDomain ? 'explicit' : 'derived-root-domain',
+      rootDomain,
+    };
+  }
+
+  const subdomainLabel = normalizeCloudflareTempEmailSubdomainLabel(
+    options.subdomainLabel !== undefined ? options.subdomainLabel : config.subdomain
+  ) || generateCloudflareTempEmailSubdomainLabel();
+  return {
+    domain: `${subdomainLabel}.${rootDomain}`,
+    mode: explicitDomain ? 'explicit-subdomain' : 'derived-random-subdomain',
+    rootDomain,
+    subdomainLabel,
+  };
 }
 
 async function requestCloudflareTempEmailJson(config, path, options = {}) {
@@ -5738,6 +6853,10 @@ async function requestCloudflareTempEmailJson(config, path, options = {}) {
     parsed = text;
   }
 
+  if (typeof parsed === 'string' && isCloudflareTempEmailHtmlResponse(parsed)) {
+    throw new Error('Cloudflare Temp Email 返回了前端 HTML 页面而不是 API JSON，请把服务地址改为后端接口地址，例如 https://api.mail.iobsessy.com');
+  }
+
   if (!response.ok) {
     const payloadError = typeof parsed === 'object' && parsed
       ? (parsed.message || parsed.error || parsed.msg)
@@ -5753,13 +6872,13 @@ async function fetchCloudflareTempEmailAddress(state, options = {}) {
   const latestState = state || await getState();
   const config = ensureCloudflareTempEmailConfig(latestState, {
     requireAdminAuth: true,
-    requireDomain: true,
   });
   const requestedName = String(options.localPart || options.name || '').trim().toLowerCase() || generateCloudflareAliasLocalPart();
+  const requestDomain = resolveCloudflareTempEmailRequestDomain(config, options);
   const payload = {
     enablePrefix: true,
     name: requestedName,
-    domain: config.domain,
+    domain: requestDomain.domain,
   };
   const result = await requestCloudflareTempEmailJson(config, '/admin/new_address', {
     method: 'POST',
@@ -5771,7 +6890,15 @@ async function fetchCloudflareTempEmailAddress(state, options = {}) {
   }
 
   await setEmailState(address);
-  await addLog(`Cloudflare Temp Email：已生成 ${address}`, 'ok');
+  if (requestDomain.mode === 'derived-random-subdomain') {
+    await addLog(`Cloudflare Temp Email：已按 Worker 根域名 ${requestDomain.rootDomain} 自动生成随机二级域名邮箱 ${address}`, 'ok');
+  } else if (requestDomain.mode === 'explicit-subdomain') {
+    await addLog(`Cloudflare Temp Email：已按根域名 ${requestDomain.rootDomain} 生成二级域名邮箱 ${address}`, 'ok');
+  } else if (requestDomain.mode === 'derived-root-domain') {
+    await addLog(`Cloudflare Temp Email：已按 Worker 根域名 ${requestDomain.rootDomain} 生成邮箱 ${address}`, 'ok');
+  } else {
+    await addLog(`Cloudflare Temp Email：已生成 ${address}`, 'ok');
+  }
   return address;
 }
 
@@ -5840,7 +6967,8 @@ const AUTO_STEP_DELAYS = {
   6: 3000,
   7: 2000,
   8: 2000,
-  9: 1000,
+  9: 2000,
+  10: 1000,
 };
 
 async function resumeAutoRunIfWaitingForEmail(options = {}) {
@@ -5961,8 +7089,8 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
 
 async function runAutoSequenceFromStep(startStep, context = {}) {
   const { targetRun, totalRuns, attemptRuns, continued = false } = context;
-  const maxStep9RestartAttempts = 5;
-  let step9RestartAttempts = 0;
+  const maxStep10RestartAttempts = 5;
+  let step10RestartAttempts = 0;
 
   if (continued) {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续当前进度，从步骤 ${startStep} 开始（第 ${attemptRuns} 次尝试）===`, 'info');
@@ -5997,7 +7125,7 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
   }
 
   let step = Math.max(startStep, 4);
-  while (step <= 9) {
+  while (step <= 10) {
     try {
       await executeStepAndWait(step, AUTO_STEP_DELAYS[step]);
       const latestState = await getState();
@@ -6009,21 +7137,21 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     } catch (err) {
       const latestState = await getState();
       const currentMail = getMailConfig(latestState);
-      const shouldRetryStep9 = step === 9
+      const shouldRetryStep10 = step === 10
         && (
           isLegacyStep9RecoverableAuthError(err)
           || (currentMail.provider === HOTMAIL_PROVIDER && isStep9RecoverableAuthError(err))
         )
-        && step9RestartAttempts < maxStep9RestartAttempts;
+        && step10RestartAttempts < maxStep10RestartAttempts;
 
-      if (shouldRetryStep9) {
-        step9RestartAttempts += 1;
+      if (shouldRetryStep10) {
+        step10RestartAttempts += 1;
         await addLog(
-          `步骤 9：检测到 CPA 认证失败，正在回到步骤 6 重新开始授权流程（${step9RestartAttempts}/${maxStep9RestartAttempts}）...`,
+          `步骤 10：检测到 CPA 认证失败，正在回到步骤 6 重新开始授权流程（${step10RestartAttempts}/${maxStep10RestartAttempts}）...`,
           'warn'
         );
         await invalidateDownstreamAfterStepRestart(6, {
-          logLabel: `步骤 9 认证失败后准备回到步骤 6 重试（${step9RestartAttempts}/${maxStep9RestartAttempts}）`,
+          logLabel: `步骤 10 认证失败后准备回到步骤 6 重试（${step10RestartAttempts}/${maxStep10RestartAttempts}）`,
         });
         step = 6;
         continue;
@@ -6270,6 +7398,7 @@ async function autoRunLoop(totalRuns, options = {}) {
   autoRunCurrentRun = 0;
   autoRunAttemptRun = 0;
   const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
+  const autoRetryMode = normalizeAutoRetryMode(options.autoRetryMode);
   const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
   const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
     ? Math.min(totalRuns, options.resumeCurrentRun)
@@ -6277,7 +7406,8 @@ async function autoRunLoop(totalRuns, options = {}) {
   const resumeAttemptRun = Number.isInteger(options.resumeAttemptRun) && options.resumeAttemptRun > 0
     ? Math.min(AUTO_RUN_MAX_RETRIES_PER_ROUND + 1, options.resumeAttemptRun)
     : 1;
-  let continueCurrentOnFirstAttempt = initialMode === 'continue';
+  const resumeFreshAttempt = Boolean(options.resumeFreshAttempt);
+  let continueCurrentOnFirstAttempt = initialMode === 'continue' && !resumeFreshAttempt;
   let forceFreshTabsNextRun = false;
   let stoppedEarly = false;
   let parkedByTimer = false;
@@ -6304,6 +7434,8 @@ async function autoRunLoop(totalRuns, options = {}) {
 
   await setState({
     autoRunSkipFailures,
+    autoRetryMode,
+    autoRunResumeFreshAttempt: false,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
     ...getAutoRunStatusPayload(initialPhase, {
       currentRun: showResumePosition ? resumeCurrentRun : 0,
@@ -6315,8 +7447,9 @@ async function autoRunLoop(totalRuns, options = {}) {
   for (let targetRun = resumeCurrentRun; targetRun <= totalRuns; targetRun += 1) {
     const roundSummary = roundSummaries[targetRun - 1];
     let roundRecordAppended = false;
-    const resumingCurrentRound = continueCurrentOnFirstAttempt && targetRun === resumeCurrentRun;
-    let attemptRun = resumingCurrentRound ? resumeAttemptRun : 1;
+    const isResumeTargetRound = targetRun === resumeCurrentRun;
+    const resumingCurrentRound = continueCurrentOnFirstAttempt && isResumeTargetRound;
+    let attemptRun = isResumeTargetRound ? resumeAttemptRun : 1;
     let reuseExistingProgress = resumingCurrentRound;
     const maxAttemptsForRound = autoRunSkipFailures
       ? AUTO_RUN_MAX_RETRIES_PER_ROUND + 1
@@ -6365,6 +7498,8 @@ async function autoRunLoop(totalRuns, options = {}) {
           inbucketMailbox: prevState.inbucketMailbox,
           cloudflareDomain: prevState.cloudflareDomain,
           cloudflareDomains: prevState.cloudflareDomains,
+          currentHeroSmsActivation: prevState.currentHeroSmsActivation,
+          heroSmsLastCode: prevState.heroSmsLastCode,
           autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
           tabRegistry: {},
           sourceLastUrls: {},
@@ -6442,6 +7577,7 @@ async function autoRunLoop(totalRuns, options = {}) {
           : String(err?.message || err || '');
         roundSummary.failureReasons.push(reason);
         const canRetry = autoRunSkipFailures && attemptRun < maxAttemptsForRound;
+        const shouldPauseBeforeRetry = canRetry && autoRetryMode === 'pause';
 
         await setState({
           autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
@@ -6456,6 +7592,35 @@ async function autoRunLoop(totalRuns, options = {}) {
           }
           cancelPendingCommands('当前尝试已放弃。');
           await broadcastStopToContentScripts();
+          if (shouldPauseBeforeRetry) {
+            forceFreshTabsNextRun = true;
+            await setState({
+              autoRunResumeFreshAttempt: true,
+              ...getAutoRunStatusPayload('waiting_retry_confirm', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun: attemptRun + 1,
+                countdownNote: `上一轮失败：${reason}`,
+              }),
+            });
+            await broadcastAutoRunStatus('waiting_retry_confirm', {
+              currentRun: targetRun,
+              totalRuns,
+              attemptRun: attemptRun + 1,
+              countdownNote: `上一轮失败：${reason}`,
+            }, {
+              autoRunSkipFailures,
+              autoRetryMode,
+              autoRunResumeFreshAttempt: true,
+              autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+            });
+            await addLog(
+              `自动重试已暂停：下一步是第 ${targetRun}/${totalRuns} 轮第 ${attemptRun + 1} 次尝试（第 ${retryIndex}/${AUTO_RUN_MAX_RETRIES_PER_ROUND} 次重试）。点击“继续重试”后再开始。`,
+              'warn'
+            );
+            parkedByTimer = true;
+            break;
+          }
           await broadcastAutoRunStatus('retrying', {
             currentRun: targetRun,
             totalRuns,
@@ -6637,14 +7802,18 @@ async function resumeAutoRun() {
   const totalRuns = state.autoRunTotalRuns || 1;
   const currentRun = state.autoRunCurrentRun || 1;
   const attemptRun = state.autoRunAttemptRun || 1;
+  const resumeFreshAttempt = Boolean(state.autoRunResumeFreshAttempt);
 
   await addLog('检测到自动流程暂停上下文已丢失，正在从当前进度恢复自动运行...', 'warn');
+  await setState({ autoRunResumeFreshAttempt: false });
   startAutoRunLoop(totalRuns, {
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
+    autoRetryMode: normalizeAutoRetryMode(state.autoRetryMode),
     mode: 'continue',
     resumeCurrentRun: currentRun,
     resumeAttemptRun: attemptRun,
     resumeRoundSummaries: state.autoRunRoundSummaries,
+    resumeFreshAttempt,
   });
   return true;
 }
@@ -6808,16 +7977,20 @@ async function ensureSignupEntryPageReady(step = 1) {
   return { tabId, result: result || {} };
 }
 
-async function ensureSignupPasswordPageReadyInTab(tabId, step = 2, options = {}) {
+async function ensureSignupPostEmailReadyInTab(tabId, step = 2, options = {}) {
   const { skipUrlWait = false } = options;
 
   if (!skipUrlWait) {
-    const matchedTab = await waitForTabUrlMatch(tabId, (url) => isSignupPasswordPageUrl(url), {
-      timeoutMs: 45000,
-      retryDelayMs: 300,
-    });
+    const matchedTab = await waitForTabUrlMatch(
+      tabId,
+      (url) => isSignupPasswordPageUrl(url) || isSignupVerificationPageUrl(url),
+      {
+        timeoutMs: 45000,
+        retryDelayMs: 300,
+      }
+    );
     if (!matchedTab) {
-      throw new Error('等待进入密码页超时，请检查邮箱提交后页面是否仍停留在官网或邮箱页。');
+      await addLog(`步骤 ${step}：URL 等待未命中密码页，将改为按页面内容继续确认是否已进入验证码阶段...`, 'warn');
     }
   }
 
@@ -6826,18 +7999,18 @@ async function ensureSignupPasswordPageReadyInTab(tabId, step = 2, options = {})
     injectSource: 'signup-page',
     timeoutMs: 45000,
     retryDelayMs: 900,
-    logMessage: `步骤 ${step}：密码页仍在加载，正在重试连接内容脚本...`,
+    logMessage: `步骤 ${step}：认证页仍在切换，正在重试连接内容脚本...`,
   });
 
   const result = await sendToContentScriptResilient('signup-page', {
-    type: 'ENSURE_SIGNUP_PASSWORD_PAGE_READY',
+    type: 'ENSURE_SIGNUP_POST_EMAIL_READY',
     step,
     source: 'background',
     payload: {},
   }, {
     timeoutMs: 20000,
     retryDelayMs: 700,
-    logMessage: `步骤 ${step}：认证页正在切换，等待密码页重新就绪...`,
+    logMessage: `步骤 ${step}：认证页正在切换，等待密码页或验证码页重新就绪...`,
   });
 
   if (result?.error) {
@@ -6920,13 +8093,16 @@ async function executeStep2(state) {
     throw new Error(step2Result.error);
   }
 
-  if (!step2Result?.alreadyOnPasswordPage) {
-    await addLog(`步骤 2：邮箱 ${resolvedEmail} 已提交，正在等待进入密码页...`);
+  if (!step2Result?.alreadyOnPasswordPage && !step2Result?.alreadyOnVerificationPage) {
+    await addLog(`步骤 2：邮箱 ${resolvedEmail} 已提交，正在等待进入密码页或验证码页...`);
   }
 
-  await ensureSignupPasswordPageReadyInTab(signupTabId, 2, {
-    skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
+  const readyResult = await ensureSignupPostEmailReadyInTab(signupTabId, 2, {
+    skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage || step2Result?.alreadyOnVerificationPage),
   });
+  if (readyResult?.state === 'verification_page') {
+    await addLog('步骤 2：当前页面已直接进入注册验证码阶段，后续将自动跳过密码填写并继续收码。', 'warn');
+  }
   await completeStepFromBackground(2, {});
 }
 
@@ -8094,45 +9270,13 @@ async function runStep7Attempt(state) {
     }
   }
 
-  const shouldRefreshOAuthBeforeSubmit = getPanelMode(state) === 'cpa';
-  let step6ReplayCompleted = false;
-
   await resolveVerificationStep(7, state, mail, {
     filterAfterTimestamp: mail.provider === HOTMAIL_PROVIDER ? undefined : Math.max(0, stepStartedAt - 60000),
     requestFreshCodeFirst: false,
     resendIntervalMs: (mail.provider === HOTMAIL_PROVIDER || mail.provider === '2925')
       ? 0
       : STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
-    beforeSubmit: shouldRefreshOAuthBeforeSubmit ? async (result) => {
-      if (step6ReplayCompleted) {
-        return;
-      }
-
-      step6ReplayCompleted = true;
-      await addLog(`步骤 7：已拿到登录验证码 ${result.code}，先刷新 CPA OAuth 链接并重走步骤 6，再回填验证码。`, 'warn');
-      await rerunStep6ForStep7Recovery({
-        logMessage: '步骤 7：正在重新获取最新 CPA OAuth 链接，并快速重走步骤 6...',
-        skipPreLoginCleanup: true,
-        postStepDelayMs: 1200,
-      });
-      await ensureStep7VerificationPageReady();
-      await addLog('步骤 7：登录验证码页面已重新就绪，开始回填刚才获取到的验证码。', 'info');
-    } : undefined,
   });
-}
-
-async function rerunStep6ForStep7Recovery(options = {}) {
-  const {
-    logMessage = '步骤 7：正在回到步骤 6，重新发起登录验证码流程...',
-    skipPreLoginCleanup = false,
-    postStepDelayMs = 3000,
-  } = options;
-  const currentState = await getState();
-  await addLog(logMessage, 'warn');
-  await executeStep6(currentState, { skipPreLoginCleanup });
-  if (postStepDelayMs > 0) {
-    await sleepWithStop(postStepDelayMs);
-  }
 }
 
 async function executeStep7(state) {
@@ -8146,45 +9290,18 @@ async function executeStep7(state) {
     return;
   }
 
-  let currentState = state;
-  let mailPollingAttempt = 1;
-  let lastMailPollingError = null;
-
-  while (true) {
-    try {
-      await runStep7Attempt(currentState);
-      return;
-    } catch (err) {
-      if (!isVerificationMailPollingError(err)) {
-        throw err;
-      }
-
-      lastMailPollingError = err;
-      if (mailPollingAttempt >= STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS) {
-        break;
-      }
-
-      mailPollingAttempt += 1;
-      await addLog(
-        `步骤 7：检测到邮箱轮询类失败，准备从步骤 6 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`,
-        'warn'
-      );
-      await rerunStep6ForStep7Recovery();
-      currentState = await getState();
+  try {
+    await runStep7Attempt(state);
+  } catch (err) {
+    if (isVerificationMailPollingError(err)) {
+      throw new Error(`步骤 7：登录验证码获取失败：${getErrorMessage(err)}`);
     }
+    throw err;
   }
-
-  if (lastMailPollingError) {
-    throw new Error(
-      `步骤 7：登录验证码流程在 ${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS} 轮邮箱轮询恢复后仍未成功。最后一次原因：${lastMailPollingError.message}`
-    );
-  }
-
-  throw new Error('步骤 7：登录验证码流程未成功完成。');
 }
 
 // ============================================================
-// Step 8: 完成 OAuth（自动点击 + localhost 回调监听）
+// Step 8-9 helpers: 手机号验证完成后继续 OAuth，并监听 localhost 回调
 // ============================================================
 
 let webNavListener = null;
@@ -8260,6 +9377,219 @@ async function getStep8PageState(tabId, responseTimeoutMs = 1500) {
   }
 }
 
+async function getPhoneVerificationPageState(tabId, responseTimeoutMs = 1500) {
+  try {
+    const result = await sendTabMessageWithTimeout(tabId, 'signup-page', {
+      type: 'GET_PHONE_VERIFICATION_STATE',
+      source: 'background',
+      payload: {},
+    }, responseTimeoutMs);
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    return result;
+  } catch (err) {
+    if (isRetryableContentScriptTransportError(err)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function submitPhoneNumberOnPage(tabId, phoneNumber) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'SUBMIT_PHONE_NUMBER',
+    source: 'background',
+    payload: { phoneNumber },
+  }, {
+    timeoutMs: 30000,
+    retryDelayMs: 600,
+    logMessage: '手机号页面正在切换，等待手机号输入框重新就绪...',
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || {};
+}
+
+async function fillPhoneVerificationCodeOnPage(tabId, code) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'FILL_PHONE_VERIFICATION_CODE',
+    source: 'background',
+    payload: { code },
+  }, {
+    timeoutMs: 45000,
+    retryDelayMs: 600,
+    logMessage: '手机号验证码页面正在切换，等待输入框重新就绪...',
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || {};
+}
+
+async function triggerPhoneVerificationCodeResendOnPage(tabId) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'RESEND_PHONE_VERIFICATION_CODE',
+    source: 'background',
+    payload: {},
+  }, {
+    timeoutMs: 15000,
+    retryDelayMs: 600,
+    logMessage: '手机号页面正在切换，等待重新发送验证码按钮就绪...',
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || {};
+}
+
+async function triggerPhoneVerificationRetryOnPage(tabId) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'CLICK_PHONE_VERIFICATION_RETRY',
+    source: 'background',
+    payload: {},
+  }, {
+    timeoutMs: 20000,
+    retryDelayMs: 600,
+    logMessage: '手机号异常页正在切换，等待“重试”按钮就绪...',
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || {};
+}
+
+async function handleHeroSmsPhonePageDuringStep8(tabId) {
+  for (let attempt = 1; attempt <= HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT; attempt += 1) {
+    const state = await getState();
+    await setHeroSmsRuntimeStatusState('正在获取 HeroSMS 号码...');
+    const activation = await ensureHeroSmsActivationForFlow(state);
+    await setState({ heroSmsPendingSuccessActivationId: 0 });
+    await setHeroSmsRuntimeStatusState(`正在提交手机号 ${activation.phoneNumber}`);
+    await addLog(`步骤 8：检测到手机号页面，正在使用 HeroSMS 号码 ${activation.phoneNumber} 自动接码...`, 'warn');
+
+    try {
+      const submitResult = await submitPhoneNumberOnPage(tabId, activation.phoneNumber);
+      if (submitResult?.errorText) {
+        const submitError = new Error(`手机号提交失败：${submitResult.errorText}`);
+        submitError.errorText = submitResult.errorText;
+        throw submitError;
+      }
+      await setHeroSmsRuntimeStatusState(`号码 ${activation.phoneNumber} 已提交，等待短信验证码`);
+
+      const shouldRequestFreshCodeOnStart = Boolean(activation.lastCode) || activation.useCount > 0;
+      if (shouldRequestFreshCodeOnStart) {
+        await addLog(`步骤 8：当前号码已复用 ${activation.useCount}/${HERO_SMS_NUMBER_MAX_USES} 次，先请求下一条短信验证码...`, 'warn');
+      }
+
+      const smsResult = await waitForHeroSmsCode(await getState(), activation, {
+        markReady: true,
+        resendAfterMs: HERO_SMS_RESEND_AFTER_MS,
+        pollIntervalMs: HERO_SMS_SMS_POLL_INTERVAL_MS,
+        timeoutMs: HERO_SMS_SMS_TIMEOUT_MS,
+        excludeCodes: activation.lastCode ? [activation.lastCode] : [],
+        requestFreshCodeOnStart: shouldRequestFreshCodeOnStart,
+        maxResendAttempts: Math.max(1, Math.floor(HERO_SMS_SMS_TIMEOUT_MS / HERO_SMS_RESEND_AFTER_MS)),
+        onResend: async ({ attempt: resendAttempt, reason }) => {
+          const reasonText = reason === 'initial' ? '准备下一轮复用' : '等待新短信超时';
+          await setHeroSmsRuntimeStatusState(`${reasonText}，第 ${resendAttempt} 次请求新短信`);
+          await addLog(`步骤 8：${reasonText}，正在第 ${resendAttempt} 次请求新的手机号验证码...`, 'warn');
+
+          try {
+            const resendPageResult = await triggerPhoneVerificationCodeResendOnPage(tabId);
+            if (resendPageResult?.resent) {
+              await addLog('步骤 8：已点击页面上的“重新发送短信”按钮。', 'warn');
+            } else {
+              await addLog('步骤 8：页面上的“重新发送短信”按钮暂不可用，本次仅请求 HeroSMS 侧重发。', 'warn');
+            }
+          } catch (err) {
+            await addLog(`步骤 8：页面重发短信失败：${err.message}`, 'warn');
+          }
+
+          await requestHeroSmsResendForCurrentActivation({ silent: false });
+        },
+      });
+      await setHeroSmsRuntimeStatusState(`已收到验证码 ${smsResult.code}，正在回填页面`);
+      await addLog(`步骤 8：已从 HeroSMS 收到短信验证码 ${smsResult.code}，正在回填到手机号页面...`, 'ok');
+
+      const fillResult = await fillPhoneVerificationCodeOnPage(tabId, smsResult.code);
+      if (fillResult?.invalidCode) {
+        const fillError = new Error(`手机号验证码被页面拒绝：${fillResult.errorText || smsResult.code}`);
+        fillError.errorText = fillResult.errorText || smsResult.code;
+        throw fillError;
+      }
+
+      await setState({ heroSmsPendingSuccessActivationId: activation.activationId });
+      await setHeroSmsRuntimeStatusState('手机号验证码已提交，等待页面跳转');
+      await addLog('步骤 8：手机号验证码已提交，继续等待后续页面跳转...', 'ok');
+      return {
+        ok: true,
+        code: smsResult.code,
+      };
+    } catch (err) {
+      await setState({ heroSmsPendingSuccessActivationId: 0 });
+      await setHeroSmsRuntimeStatusState(`手机号验证失败：${err.message}`);
+
+      const shouldRetryWithFreshNumber = shouldRetryStep8WithFreshHeroSmsNumber(err);
+      const latestState = await getState();
+      const currentActivation = getCurrentHeroSmsActivation(latestState);
+
+      if (shouldRetryWithFreshNumber && currentActivation && currentActivation.activationId === activation.activationId) {
+        await addLog(
+          `步骤 8：检测到 phone_max_usage_exceeded，当前 HeroSMS 号码 ${activation.phoneNumber} 不再复用，正在申请新号码（${attempt}/${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT}）...`,
+          'warn'
+        );
+        try {
+          await moveHeroSmsActivationToFailedList(
+            activation,
+            'phone_max_usage_exceeded',
+            String(err?.errorText || err?.message || '').trim()
+          );
+          await addLog(
+            `步骤 8：已将号码 ${activation.phoneNumber}（ID ${activation.activationId}）记录到失败列表，2 分钟后自动清理。`,
+            'warn'
+          );
+        } catch (listErr) {
+          await addLog(`步骤 8：记录 phone_max_usage_exceeded 失败号码时出错：${listErr.message}`, 'warn');
+        }
+
+        try {
+          const retryPageResult = await triggerPhoneVerificationRetryOnPage(tabId);
+          if (retryPageResult?.clicked) {
+            await addLog(
+              retryPageResult?.ready
+                ? '步骤 8：已点击页面“重试”按钮，页面已回到手机号填写阶段。'
+                : '步骤 8：已点击页面“重试”按钮，页面正在返回手机号填写阶段...',
+              'warn'
+            );
+          } else {
+            await addLog('步骤 8：当前未找到可点击的“重试”按钮，将直接继续等待页面回到手机号填写阶段。', 'warn');
+          }
+        } catch (retryErr) {
+          await addLog(`步骤 8：点击页面“重试”按钮失败：${retryErr.message}`, 'warn');
+        }
+
+        if (attempt < HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT) {
+          await sleepWithStop(800);
+          continue;
+        }
+      }
+
+      if (!shouldRetryWithFreshNumber && currentActivation && currentActivation.activationId === activation.activationId) {
+        await addLog(
+          `步骤 8：手机号验证失败，但未命中 phone_max_usage_exceeded，保留当前 HeroSMS 号码 ${activation.phoneNumber} 以便后续排查。`,
+          'warn'
+        );
+      }
+
+      throw err;
+    }
+  }
+
+  throw new Error(`步骤 8：连续 ${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT} 次触发 phone_max_usage_exceeded，未能申请到可用手机号。`);
+}
+
 async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS) {
   const start = Date.now();
   let recovered = false;
@@ -8267,10 +9597,10 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS)
   while (Date.now() - start < timeoutMs) {
     throwIfStopped();
     const pageState = await getStep8PageState(tabId);
-    if (pageState?.addPhonePage) {
-      throw new Error('步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
-    }
     if (pageState?.consentReady) {
+      return pageState;
+    }
+    if (pageState?.addPhonePage) {
       return pageState;
     }
     if (pageState === null && !recovered) {
@@ -8396,7 +9726,7 @@ async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLI
 
     const pageState = await getStep8PageState(tabId);
     if (pageState?.addPhonePage) {
-      throw new Error('步骤 8：点击“继续”后页面跳到了手机号页面，当前流程无法继续自动授权。');
+      return { progressed: true, reason: 'add_phone_page', url: tab.url };
     }
     if (pageState === null) {
       if (!recovered) {
@@ -8422,6 +9752,8 @@ function getStep8EffectLabel(effect) {
   switch (effect?.reason) {
     case 'url_changed':
       return `URL 已变化：${effect.url}`;
+    case 'add_phone_page':
+      return '页面已进入手机号验证页';
     case 'page_reloading':
       return '页面正在跳转或重载';
     case 'left_consent_page':
@@ -8436,7 +9768,52 @@ async function executeStep8(state) {
     throw new Error('缺少登录用 OAuth 链接，请先完成步骤 6。');
   }
 
-  await addLog('步骤 8：正在监听 localhost 回调地址...');
+  await setHeroSmsRuntimeStatusState('等待进入手机号验证页面');
+  let signupTabId = await getTabId('signup-page');
+  if (signupTabId && await isTabAlive('signup-page')) {
+    await chrome.tabs.update(signupTabId, { active: true });
+  } else {
+    signupTabId = await reuseOrCreateTab('signup-page', state.oauthUrl);
+  }
+
+  await ensureStep8SignupPageReady(signupTabId, {
+    timeoutMs: 15000,
+    logMessage: '步骤 8：认证页内容脚本尚未就绪，正在等待页面恢复...',
+  });
+
+  const start = Date.now();
+  while (Date.now() - start < 30000) {
+    throwIfStopped();
+    const pageState = await waitForStep8Ready(signupTabId, 5000);
+    if (pageState?.consentReady) {
+      await setHeroSmsRuntimeStatusState('当前无需手机号验证');
+      await addLog('步骤 8：当前无需手机号验证，直接继续下一步 OAuth 授权。', 'info');
+      await completeStepFromBackground(8, {
+        skipped: true,
+        reason: 'phone_verification_not_required',
+      });
+      return;
+    }
+    if (pageState?.addPhonePage) {
+      await addLog('步骤 8：检测到手机号验证页面，正在使用 HeroSMS 自动完成验证...', 'info');
+      await handleHeroSmsPhonePageDuringStep8(signupTabId);
+      await completeStepFromBackground(8, {
+        phoneVerified: true,
+      });
+      return;
+    }
+    await sleepWithStop(300);
+  }
+
+  throw new Error('步骤 8：长时间未进入手机号验证页或 OAuth 授权页。');
+}
+
+async function executeStep9(state) {
+  if (!state.oauthUrl) {
+    throw new Error('缺少登录用 OAuth 链接，请先完成步骤 6。');
+  }
+
+  await addLog('步骤 9：正在监听 localhost 回调地址...');
 
   return new Promise((resolve, reject) => {
     let resolved = false;
@@ -8462,8 +9839,8 @@ async function executeStep8(state) {
       cleanupListener();
       clearTimeout(timeout);
 
-      addLog(`步骤 8：已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
-        return completeStepFromBackground(8, { localhostUrl: callbackUrl });
+      addLog(`步骤 9：已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
+        return completeStepFromBackground(9, { localhostUrl: callbackUrl });
       }).then(() => {
         resolve();
       }).catch((err) => {
@@ -8472,7 +9849,7 @@ async function executeStep8(state) {
     };
 
     const timeout = setTimeout(() => {
-      rejectStep8(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 8 的点击可能被拦截了。'));
+      rejectStep8(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 9 的点击可能被拦截了。'));
     }, 120000);
 
     step8PendingReject = (error) => {
@@ -8502,10 +9879,24 @@ async function executeStep8(state) {
 
         if (signupTabId && await isTabAlive('signup-page')) {
           await chrome.tabs.update(signupTabId, { active: true });
-          await addLog('步骤 8：已切回认证页，正在准备调试器点击...');
+          await addLog('步骤 9：已切回认证页，正在准备调试器点击...');
         } else {
           signupTabId = await reuseOrCreateTab('signup-page', state.oauthUrl);
-          await addLog('步骤 8：已重新打开认证页，正在准备调试器点击...');
+          await addLog('步骤 9：已重新打开认证页，正在准备调试器点击...');
+        }
+
+        throwIfStep8SettledOrStopped(resolved);
+        const currentTab = await chrome.tabs.get(signupTabId).catch(() => null);
+        const immediateCallbackUrl = getStep8CallbackUrlFromTabUpdate(
+          signupTabId,
+          { url: currentTab?.url },
+          currentTab,
+          signupTabId
+        );
+        if (immediateCallbackUrl) {
+          await addLog('步骤 9：检测到页面已直接跳转到 localhost 回调，正在直接完成本步骤...', 'info');
+          finalizeStep8Callback(immediateCallbackUrl);
+          return;
         }
 
         throwIfStep8SettledOrStopped(resolved);
@@ -8514,12 +9905,15 @@ async function executeStep8(state) {
         chrome.tabs.onUpdated.addListener(step8TabUpdatedListener);
         await ensureStep8SignupPageReady(signupTabId, {
           timeoutMs: 15000,
-          logMessage: '步骤 8：认证页内容脚本尚未就绪，正在等待页面恢复...',
+          logMessage: '步骤 9：认证页内容脚本尚未就绪，正在等待页面恢复...',
         });
 
         for (let round = 1; round <= STEP8_MAX_ROUNDS && !resolved; round++) {
           throwIfStep8SettledOrStopped(resolved);
           const pageState = await waitForStep8Ready(signupTabId);
+          if (pageState?.addPhonePage) {
+            throw new Error('步骤 9：当前仍停留在手机号验证页面，请先完成步骤 8。');
+          }
           if (!pageState?.consentReady) {
             await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
             continue;
@@ -8527,7 +9921,7 @@ async function executeStep8(state) {
 
           const strategy = STEP8_STRATEGIES[Math.min(round - 1, STEP8_STRATEGIES.length - 1)];
 
-          await addLog(`步骤 8：第 ${round}/${STEP8_MAX_ROUNDS} 轮尝试点击“继续”（${strategy.label}）...`);
+          await addLog(`步骤 9：第 ${round}/${STEP8_MAX_ROUNDS} 轮尝试点击“继续”（${strategy.label}）...`);
 
           if (strategy.mode === 'debugger') {
             const clickTarget = await prepareStep8DebuggerClick(signupTabId);
@@ -8547,15 +9941,15 @@ async function executeStep8(state) {
           }
 
           if (effect.progressed) {
-            await addLog(`步骤 8：检测到本次点击已生效，${getStep8EffectLabel(effect)}，继续等待 localhost 回调...`, 'info');
+            await addLog(`步骤 9：检测到本次点击已生效，${getStep8EffectLabel(effect)}，继续等待 localhost 回调...`, 'info');
             break;
           }
 
           if (round >= STEP8_MAX_ROUNDS) {
-            throw new Error(`步骤 8：连续 ${STEP8_MAX_ROUNDS} 轮点击“继续”后页面仍无反应。`);
+            throw new Error(`步骤 9：连续 ${STEP8_MAX_ROUNDS} 轮点击“继续”后页面仍无反应。`);
           }
 
-          await addLog(`步骤 8：${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）...`, 'warn');
+          await addLog(`步骤 9：${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）...`, 'warn');
           await reloadStep8ConsentPage(signupTabId);
           await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
         }
@@ -8567,37 +9961,37 @@ async function executeStep8(state) {
 }
 
 // ============================================================
-// Step 9: 平台回调验证
+// Step 10: 平台回调验证
 // ============================================================
 
-async function executeStep9(state) {
+async function executeStep10(state) {
   if (getPanelMode(state) === 'sub2api') {
-    return executeSub2ApiStep9(state);
+    return executeSub2ApiStep10(state);
   }
-  return executeCpaStep9(state);
+  return executeCpaStep10(state);
 }
 
-async function executeCpaStep9(state) {
+async function executeCpaStep10(state) {
   if (state.localhostUrl && !isLocalhostOAuthCallbackUrl(state.localhostUrl)) {
-    throw new Error('步骤 8 捕获到的 localhost OAuth 回调地址无效，请重新执行步骤 8。');
+    throw new Error('步骤 9 捕获到的 localhost OAuth 回调地址无效，请重新执行步骤 9。');
   }
   if (!state.localhostUrl) {
-    throw new Error('缺少 localhost 回调地址，请先完成步骤 8。');
+    throw new Error('缺少 localhost 回调地址，请先完成步骤 9。');
   }
   if (!state.vpsUrl) {
     throw new Error('尚未填写 CPA 地址，请先在侧边栏输入。');
   }
 
   if (shouldBypassStep9ForLocalCpa(state)) {
-    await addLog('步骤 9：检测到本地 CPA，且当前策略为“跳过第9步”，本轮不再重复提交回调地址。', 'info');
-    await completeStepFromBackground(9, {
+    await addLog('步骤 10：检测到本地 CPA，且当前策略为“跳过第10步”，本轮不再重复提交回调地址。', 'info');
+    await completeStepFromBackground(10, {
       localhostUrl: state.localhostUrl,
       verifiedStatus: 'local-auto',
     });
     return;
   }
 
-  await addLog('步骤 9：正在打开 CPA 面板...');
+  await addLog('步骤 10：正在打开 CPA 面板...');
 
   const injectFiles = ['content/activation-utils.js', 'content/utils.js', 'content/vps-panel.js'];
   let tabId = await getTabId('vps-panel');
@@ -8618,19 +10012,19 @@ async function executeCpaStep9(state) {
     inject: injectFiles,
     timeoutMs: 45000,
     retryDelayMs: 900,
-    logMessage: '步骤 9：CPA 面板仍在加载，正在重试连接...',
+    logMessage: '步骤 10：CPA 面板仍在加载，正在重试连接...',
   });
 
-  await addLog('步骤 9：正在填写回调地址...');
+  await addLog('步骤 10：正在填写回调地址...');
   const result = await sendToContentScriptResilient('vps-panel', {
     type: 'EXECUTE_STEP',
-    step: 9,
+    step: 10,
     source: 'background',
     payload: { localhostUrl: state.localhostUrl, vpsPassword: state.vpsPassword },
   }, {
     timeoutMs: 30000,
     retryDelayMs: 700,
-    logMessage: '步骤 9：CPA 面板通信未就绪，正在等待页面恢复...',
+    logMessage: '步骤 10：CPA 面板通信未就绪，正在等待页面恢复...',
   });
 
   if (result?.error) {
@@ -8638,12 +10032,12 @@ async function executeCpaStep9(state) {
   }
 }
 
-async function executeSub2ApiStep9(state) {
+async function executeSub2ApiStep10(state) {
   if (state.localhostUrl && !isLocalhostOAuthCallbackUrl(state.localhostUrl)) {
-    throw new Error('步骤 8 捕获到的 localhost OAuth 回调地址无效，请重新执行步骤 8。');
+    throw new Error('步骤 9 捕获到的 localhost OAuth 回调地址无效，请重新执行步骤 9。');
   }
   if (!state.localhostUrl) {
-    throw new Error('缺少 localhost 回调地址，请先完成步骤 8。');
+    throw new Error('缺少 localhost 回调地址，请先完成步骤 9。');
   }
   if (!state.sub2apiSessionId) {
     throw new Error('缺少 SUB2API 会话信息，请重新执行步骤 1。');
@@ -8658,7 +10052,7 @@ async function executeSub2ApiStep9(state) {
   const sub2apiUrl = normalizeSub2ApiUrl(state.sub2apiUrl);
   const injectFiles = ['content/utils.js', 'content/sub2api-panel.js'];
 
-  await addLog('步骤 9：正在打开 SUB2API 后台...');
+  await addLog('步骤 10：正在打开 SUB2API 后台...');
 
   let tabId = await getTabId('sub2api-panel');
   const alive = tabId && await isTabAlive('sub2api-panel');
@@ -8680,10 +10074,10 @@ async function executeSub2ApiStep9(state) {
     injectSource: 'sub2api-panel',
   });
 
-  await addLog('步骤 9：正在向 SUB2API 提交回调并创建账号...');
+  await addLog('步骤 10：正在向 SUB2API 提交回调并创建账号...');
   const result = await sendToContentScript('sub2api-panel', {
     type: 'EXECUTE_STEP',
-    step: 9,
+    step: 10,
     source: 'background',
     payload: {
       localhostUrl: state.localhostUrl,
@@ -8712,12 +10106,21 @@ async function executeSub2ApiStep9(state) {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== AUTO_RUN_TIMER_ALARM_NAME) {
+  if (alarm.name === AUTO_RUN_TIMER_ALARM_NAME) {
+    launchAutoRunTimerPlan('alarm').catch((err) => {
+      console.error(LOG_PREFIX, 'Failed to resume auto run from timer alarm:', err);
+    });
     return;
   }
-  launchAutoRunTimerPlan('alarm').catch((err) => {
-    console.error(LOG_PREFIX, 'Failed to resume auto run from timer alarm:', err);
-  });
+  if (String(alarm.name || '').startsWith(HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX)) {
+    const activationId = Number(String(alarm.name).slice(HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX.length));
+    if (!Number.isInteger(activationId) || activationId <= 0) {
+      return;
+    }
+    cleanupHeroSmsFailedActivation(activationId).catch((err) => {
+      console.error(LOG_PREFIX, 'Failed to cleanup HeroSMS failed activation:', activationId, err);
+    });
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {

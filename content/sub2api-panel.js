@@ -1,4 +1,4 @@
-// content/sub2api-panel.js — 页内脚本：SUB2API 后台（步骤 1、9）
+// content/sub2api-panel.js — 页内脚本：SUB2API 后台（步骤 1、10）
 
 console.log('[MultiPage:sub2api-panel] Content script loaded on', location.href);
 
@@ -67,6 +67,7 @@ async function handleStep(step, payload = {}) {
     case 1:
       return step1_generateOpenAiAuthUrl(payload);
     case 9:
+    case 10:
       return step9_submitOpenAiCallback(payload);
     default:
       throw new Error(`sub2api-panel.js 不处理步骤 ${step}`);
@@ -218,7 +219,7 @@ function parseLocalhostCallback(rawUrl) {
     throw new Error('回调 URL 协议不正确。');
   }
   if (!['localhost', '127.0.0.1'].includes(parsed.hostname)) {
-    throw new Error('步骤 9 只接受 localhost / 127.0.0.1 回调地址。');
+    throw new Error('步骤 10 只接受 localhost / 127.0.0.1 回调地址。');
   }
   if (parsed.pathname !== '/auth/callback') {
     throw new Error('回调 URL 路径必须是 /auth/callback。');
@@ -365,7 +366,7 @@ async function step9_submitOpenAiCallback(payload = {}) {
     throw new Error('本次 localhost 回调中的 state 与步骤 1 生成的 state 不一致，请重新执行步骤 1。');
   }
 
-  log('步骤 9：正在向 SUB2API 交换 OpenAI 授权码...');
+  log('步骤 10：正在向 SUB2API 交换 OpenAI 授权码...');
   const exchangeData = await requestJson(origin, '/api/v1/admin/openai/exchange-code', {
     method: 'POST',
     token,
@@ -399,7 +400,7 @@ async function step9_submitOpenAiCallback(payload = {}) {
     createPayload.extra = extra;
   }
 
-  log(`步骤 9：授权码交换成功，正在创建 SUB2API 账号（名称：${accountName}）...`);
+  log(`步骤 10：授权码交换成功，正在创建 SUB2API 账号（名称：${accountName}）...`);
   const createdAccount = await requestJson(origin, '/api/v1/admin/accounts', {
     method: 'POST',
     token,
@@ -407,8 +408,8 @@ async function step9_submitOpenAiCallback(payload = {}) {
   });
 
   const verifiedStatus = `SUB2API 已创建账号 #${createdAccount?.id || 'unknown'}`;
-  log(`步骤 9：${verifiedStatus}`, 'ok');
-  reportComplete(9, {
+  log(`步骤 10：${verifiedStatus}`, 'ok');
+  reportComplete(10, {
     localhostUrl: callback.url,
     verifiedStatus,
   });

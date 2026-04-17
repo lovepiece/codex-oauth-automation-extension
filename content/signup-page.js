@@ -18,11 +18,18 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'STEP8_GET_STATE'
       || message.type === 'STEP8_TRIGGER_CONTINUE'
       || message.type === 'GET_LOGIN_AUTH_STATE'
+      || message.type === 'GET_SIGNUP_FLOW_STATE'
       || message.type === 'GET_SIGNUP_PAGE_HEALTH'
       || message.type === 'PREPARE_SIGNUP_VERIFICATION'
       || message.type === 'RESEND_VERIFICATION_CODE'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
+      || message.type === 'ENSURE_SIGNUP_POST_EMAIL_READY'
+      || message.type === 'GET_PHONE_VERIFICATION_STATE'
+      || message.type === 'SUBMIT_PHONE_NUMBER'
+      || message.type === 'FILL_PHONE_VERIFICATION_CODE'
+      || message.type === 'RESEND_PHONE_VERIFICATION_CODE'
+      || message.type === 'CLICK_PHONE_VERIFICATION_RETRY'
     ) {
       resetStopState();
       handleCommand(message).then((result) => {
@@ -70,6 +77,8 @@ async function handleCommand(message) {
       return await fillVerificationCode(message.step, message.payload);
     case 'GET_LOGIN_AUTH_STATE':
       return serializeLoginAuthState(inspectLoginAuthState());
+    case 'GET_SIGNUP_FLOW_STATE':
+      return serializeSignupFlowState(inspectSignupFlowState());
     case 'GET_SIGNUP_PAGE_HEALTH':
       return inspectSignupPageHealth();
     case 'PREPARE_SIGNUP_VERIFICATION':
@@ -80,6 +89,18 @@ async function handleCommand(message) {
       return await ensureSignupEntryReady();
     case 'ENSURE_SIGNUP_PASSWORD_PAGE_READY':
       return await ensureSignupPasswordPageReady();
+    case 'ENSURE_SIGNUP_POST_EMAIL_READY':
+      return await ensureSignupPostEmailReady();
+    case 'GET_PHONE_VERIFICATION_STATE':
+      return serializePhoneVerificationState(inspectPhoneVerificationState());
+    case 'SUBMIT_PHONE_NUMBER':
+      return await submitPhoneNumber(message.payload);
+    case 'FILL_PHONE_VERIFICATION_CODE':
+      return await fillPhoneVerificationCode(message.payload);
+    case 'RESEND_PHONE_VERIFICATION_CODE':
+      return await resendPhoneVerificationCode();
+    case 'CLICK_PHONE_VERIFICATION_RETRY':
+      return await clickPhoneVerificationRetry(message.payload);
     case 'STEP8_FIND_AND_CLICK':
       return await step8_findAndClick();
     case 'STEP8_GET_STATE':
@@ -313,6 +334,36 @@ function inspectSignupEntryState() {
   };
 }
 
+function inspectSignupFlowState() {
+  const entrySnapshot = inspectSignupEntryState();
+  if (entrySnapshot.state !== 'unknown') {
+    return entrySnapshot;
+  }
+
+  const verificationTarget = getVerificationCodeTarget();
+  const verificationVisible = isEmailVerificationPage() || isVerificationPageStillVisible();
+  if (verificationTarget || verificationVisible) {
+    return {
+      state: 'verification_page',
+      verificationTarget,
+      verificationVisible,
+      url: location.href,
+    };
+  }
+
+  return entrySnapshot;
+}
+
+function serializeSignupFlowState(snapshot) {
+  return {
+    state: snapshot?.state || 'unknown',
+    url: snapshot?.url || location.href,
+    hasVerificationTarget: Boolean(snapshot?.verificationTarget),
+    verificationVisible: Boolean(snapshot?.verificationVisible),
+    displayedEmail: snapshot?.displayedEmail || '',
+  };
+}
+
 async function waitForSignupEntryState(options = {}) {
   const {
     timeout = 15000,
@@ -323,9 +374,9 @@ async function waitForSignupEntryState(options = {}) {
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
-    const snapshot = inspectSignupEntryState();
+    const snapshot = inspectSignupFlowState();
 
-    if (snapshot.state === 'password_page' || snapshot.state === 'email_entry') {
+    if (snapshot.state === 'password_page' || snapshot.state === 'email_entry' || snapshot.state === 'verification_page') {
       return snapshot;
     }
 
@@ -345,7 +396,7 @@ async function waitForSignupEntryState(options = {}) {
     await sleep(250);
   }
 
-  return inspectSignupEntryState();
+  return inspectSignupFlowState();
 }
 
 async function ensureSignupEntryReady(timeout = 15000) {
@@ -380,6 +431,34 @@ async function ensureSignupPasswordPageReady(timeout = 20000) {
   throw new Error('等待进入密码页超时。URL: ' + location.href);
 }
 
+async function ensureSignupPostEmailReady(timeout = 20000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const snapshot = inspectSignupFlowState();
+    if (snapshot.state === 'password_page' || snapshot.state === 'verification_page') {
+      return {
+        ready: true,
+        state: snapshot.state,
+        url: snapshot.url || location.href,
+      };
+    }
+    await sleep(200);
+  }
+
+  const snapshot = inspectSignupFlowState();
+  if (snapshot.state === 'password_page' || snapshot.state === 'verification_page') {
+    return {
+      ready: true,
+      state: snapshot.state,
+      url: snapshot.url || location.href,
+    };
+  }
+
+  throw new Error('等待进入密码页或验证码页超时。URL: ' + location.href);
+}
+
 async function fillSignupEmailAndContinue(email, step) {
   if (!email) throw new Error(`未提供邮箱地址，步骤 ${step} 无法继续。`);
   const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -396,6 +475,14 @@ async function fillSignupEmailAndContinue(email, step) {
     log(`步骤 ${step}：当前已在密码页，无需重复提交邮箱。`);
     return {
       alreadyOnPasswordPage: true,
+      url: snapshot.url || location.href,
+    };
+  }
+
+  if (snapshot.state === 'verification_page') {
+    log(`步骤 ${step}：当前已在验证码页，无需重复提交邮箱。`, 'warn');
+    return {
+      alreadyOnVerificationPage: true,
       url: snapshot.url || location.href,
     };
   }
@@ -448,23 +535,62 @@ async function step3_fillEmailPassword(payload) {
   if (!password) throw new Error('未提供密码，步骤 3 需要可用密码。');
   const normalizedEmail = String(email || '').trim().toLowerCase();
 
-  let snapshot = inspectSignupEntryState();
+  let snapshot = inspectSignupFlowState();
+  if (snapshot.state === 'verification_page') {
+    log('步骤 3：页面已直接进入注册验证码阶段，本步骤无需填写密码，自动跳过。', 'warn');
+    reportComplete(3, {
+      skipped: true,
+      reason: 'already_on_signup_verification_page',
+      url: snapshot.url || location.href,
+    });
+    return {
+      skipped: true,
+      reason: 'already_on_signup_verification_page',
+      url: snapshot.url || location.href,
+    };
+  }
   if (snapshot.state === 'entry_home') {
     throw new Error('当前仍停留在 ChatGPT 官网首页，请先完成步骤 2。');
   }
 
   if (snapshot.state === 'email_entry') {
     const transition = await fillSignupEmailAndContinue(email, 3);
+    if (transition.alreadyOnVerificationPage) {
+      log('步骤 3：提交邮箱后已直接进入注册验证码阶段，本步骤无需填写密码，自动跳过。', 'warn');
+      reportComplete(3, {
+        skipped: true,
+        reason: 'signup_verification_after_email_submit',
+        url: transition.url || location.href,
+      });
+      return {
+        skipped: true,
+        reason: 'signup_verification_after_email_submit',
+        url: transition.url || location.href,
+      };
+    }
     if (!transition.alreadyOnPasswordPage) {
       await sleep(1200);
-      await ensureSignupPasswordPageReady();
+      const readyResult = await ensureSignupPostEmailReady();
+      if (readyResult?.state === 'verification_page') {
+        log('步骤 3：等待页面切换时已进入注册验证码阶段，本步骤自动跳过。', 'warn');
+        reportComplete(3, {
+          skipped: true,
+          reason: 'signup_verification_after_post_email_wait',
+          url: readyResult.url || location.href,
+        });
+        return {
+          skipped: true,
+          reason: 'signup_verification_after_post_email_wait',
+          url: readyResult.url || location.href,
+        };
+      }
     }
-    snapshot = inspectSignupEntryState();
+    snapshot = inspectSignupFlowState();
   }
 
   if (snapshot.state !== 'password_page' || !snapshot.passwordInput) {
     await ensureSignupPasswordPageReady();
-    snapshot = inspectSignupEntryState();
+    snapshot = inspectSignupFlowState();
   }
 
   if (snapshot.state !== 'password_page' || !snapshot.passwordInput) {
@@ -507,10 +633,12 @@ const OAUTH_CONSENT_FORM_SELECTOR = 'form[action*="/sign-in-with-chatgpt/" i][ac
 const STEP5_SKIP_PAGE_PATTERN = /chatgpt|入门技巧|盡管问|尽管问|请勿共享敏感信息|请核实你的信息|好的[,，\s]*开始吧|是什么促使你使用\s*chatgpt|我们会利用这些信息提出一些可能会对你有用的建议|学校|工作|个人任务|乐趣和娱乐|其他|下一步|跳过|get\s+started|tips|don't\s+share\s+sensitive\s+info|verify\s+your\s+information|what\s+brings\s+you\s+to\s+chatgpt|we(?:'ll| will)\s+use\s+this\s+information|school|work|personal\s+tasks|fun\s+and\s+entertainment|other|skip|next/i;
 const CONTINUE_ACTION_PATTERN = /继续|continue/i;
 const ADD_PHONE_PAGE_PATTERN = /add[\s-]*phone|添加手机号|手机号码|手机号|phone\s+number|telephone/i;
+const PHONE_VERIFICATION_PAGE_PATTERN = /查看你的手机|输入我们刚刚向|重新发送短信|phone\s+verification|verify\s+your\s+phone|texted\s+you\s+a\s+code/i;
 const STEP5_SUBMIT_ERROR_PATTERN = /无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|something\s+went\s+wrong|invalid\s+(?:birthday|birth|date)|生日|出生日期/i;
 const AUTH_TIMEOUT_ERROR_TITLE_PATTERN = /糟糕，出错了|something\s+went\s+wrong|oops/i;
 const AUTH_TIMEOUT_ERROR_DETAIL_PATTERN = /operation\s+timed\s+out|timed\s+out|请求超时|操作超时/i;
 const SIGNUP_EMAIL_EXISTS_PATTERN = /user[_\s-]*already[_\s-]*exists|与此电子邮件地址相关联的帐户已存在|account\s+associated\s+with\s+this\s+email\s+address\s+already\s+exists|email\s+address.*already\s+exists/i;
+const PHONE_MAX_USAGE_EXCEEDED_PATTERN = /phone_max_usage_exceeded/i;
 
 function getVerificationErrorText() {
   const messages = [];
@@ -544,6 +672,21 @@ function getVerificationErrorText() {
   }
 
   return messages.find((text) => INVALID_VERIFICATION_CODE_PATTERN.test(text)) || '';
+}
+
+function getPhoneVerificationErrorText() {
+  const genericErrorText = getVerificationErrorText();
+  if (genericErrorText) {
+    return genericErrorText;
+  }
+
+  const pageText = getPageTextSnapshot();
+  if (!PHONE_MAX_USAGE_EXCEEDED_PATTERN.test(pageText)) {
+    return '';
+  }
+
+  const match = pageText.match(/验证过程中出错\s*\(\s*phone_max_usage_exceeded\s*\)\s*。?\s*请重试。?|phone_max_usage_exceeded/i);
+  return match ? match[0] : 'phone_max_usage_exceeded';
 }
 
 function isStep5Ready() {
@@ -636,7 +779,7 @@ function isVerificationPageStillVisible() {
 
 function isAddPhonePageReady() {
   const path = `${location.pathname || ''} ${location.href || ''}`;
-  if (/\/add-phone(?:[/?#]|$)/i.test(path)) return true;
+  if (/\/(?:add-phone|phone-verification)(?:[/?#]|$)/i.test(path)) return true;
 
   const phoneInput = document.querySelector(
     'input[type="tel"]:not([maxlength="6"]), input[name*="phone" i], input[id*="phone" i], input[autocomplete="tel"]'
@@ -645,7 +788,707 @@ function isAddPhonePageReady() {
     return true;
   }
 
-  return ADD_PHONE_PAGE_PATTERN.test(getPageTextSnapshot());
+  if (getVerificationCodeTarget()) {
+    return true;
+  }
+
+  if (findResendVerificationCodeTrigger({ allowDisabled: true })) {
+    return true;
+  }
+
+  const pageText = getPageTextSnapshot();
+  return ADD_PHONE_PAGE_PATTERN.test(pageText) || PHONE_VERIFICATION_PAGE_PATTERN.test(pageText);
+}
+
+const PHONE_NUMBER_INPUT_SELECTOR = [
+  '#tel',
+  '.PhoneInputInput input',
+  'input[name="__reservedForPhoneNumberInput_tel"]',
+  'input[name*="phoneNumberInput" i]',
+  'input[aria-label*="国家号码" i]',
+  'input[aria-label*="phone number" i]',
+  'input[placeholder*="电话号码" i]',
+  'input[placeholder*="phone" i]',
+  'input[autocomplete="tel"]',
+  'input[type="tel"]:not([maxlength="6"])',
+  'input[name*="phone" i]',
+  'input[id*="phone" i]',
+].join(', ');
+
+function getPhoneNumberInput() {
+  const candidates = Array.from(document.querySelectorAll(PHONE_NUMBER_INPUT_SELECTOR));
+  return candidates.find((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return false;
+    }
+    if ((input.type || '').toLowerCase() === 'hidden') {
+      return false;
+    }
+    return isVisibleElement(input);
+  }) || null;
+}
+
+function getPhoneNumberHiddenInput() {
+  const hiddenInput = document.querySelector(
+    'input[type="hidden"][name="phoneNumber"], input[type="hidden"][id$="-phoneNumber"], input[type="hidden"][name*="phoneNumber" i]'
+  );
+  return hiddenInput || null;
+}
+
+function getPhoneCountrySelectButton() {
+  const button = document.querySelector(
+    '.react-aria-Select button[aria-haspopup="listbox"], button[aria-haspopup="listbox"], [aria-label*="国家代码" i]'
+  );
+  return button && isVisibleElement(button) ? button : null;
+}
+
+function getPhoneDigits(phoneNumber = '') {
+  return String(phoneNumber || '').replace(/\D/g, '');
+}
+
+const FIXED_PHONE_COUNTRY = {
+  key: 'TH',
+  dialCode: '66',
+  name: '泰国',
+};
+
+function getPhoneCountryOptionDialCode(option) {
+  if (!option) {
+    return '';
+  }
+
+  const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
+  const match = text.match(/\+(\d{1,4})/);
+  return match ? match[1] : '';
+}
+
+function getPhoneCountryOptionKey(option) {
+  if (!option) {
+    return '';
+  }
+
+  const dataKey = String(option.getAttribute?.('data-key') || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(dataKey)) {
+    return dataKey;
+  }
+
+  const id = String(option.id || '');
+  const match = id.match(/option-([A-Z]{2})$/);
+  return match ? match[1] : '';
+}
+
+function getPhoneCountryHiddenSelect() {
+  const select = document.querySelector(
+    '[data-testid="hidden-select-container"] select, .react-aria-Select select, fieldset select'
+  );
+  return select instanceof HTMLSelectElement ? select : null;
+}
+
+function setPhoneCountryHiddenSelectValue(countryKey = '') {
+  const normalizedKey = String(countryKey || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(normalizedKey)) {
+    return false;
+  }
+
+  const select = getPhoneCountryHiddenSelect();
+  if (!select) {
+    return false;
+  }
+
+  const optionExists = Array.from(select.options || []).some((option) => option.value === normalizedKey);
+  if (!optionExists) {
+    return false;
+  }
+
+  select.value = normalizedKey;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function findPhoneCountryOptionForNumber(phoneNumber = '') {
+  const digits = getPhoneDigits(phoneNumber);
+  if (!digits) {
+    return null;
+  }
+
+  const options = Array.from(document.querySelectorAll('[role="option"]'))
+    .filter((option) => option.getAttribute('aria-disabled') !== 'true');
+  if (!options.length) {
+    return null;
+  }
+
+  const matches = options
+    .map((option) => ({
+      option,
+      dialCode: getPhoneCountryOptionDialCode(option),
+    }))
+    .filter(({ dialCode }) => dialCode && digits.startsWith(dialCode))
+    .sort((left, right) => right.dialCode.length - left.dialCode.length);
+
+  return matches[0]?.option || null;
+}
+
+function findFixedPhoneCountryOption() {
+  const options = Array.from(document.querySelectorAll('[role="option"]'))
+    .filter((option) => option.getAttribute('aria-disabled') !== 'true');
+  if (!options.length) {
+    return null;
+  }
+
+  return options.find((option) => {
+    const countryKey = getPhoneCountryOptionKey(option);
+    if (countryKey === FIXED_PHONE_COUNTRY.key) {
+      return true;
+    }
+
+    const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
+    return text.includes(FIXED_PHONE_COUNTRY.name)
+      || text.includes(`+${FIXED_PHONE_COUNTRY.dialCode}`)
+      || text.includes(`+(${FIXED_PHONE_COUNTRY.dialCode})`);
+  }) || null;
+}
+
+async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
+  const currentDialCode = getSelectedPhoneCountryDialCode();
+  if (currentDialCode === FIXED_PHONE_COUNTRY.dialCode) {
+    return { matched: true, changed: false, dialCode: currentDialCode };
+  }
+
+  const hiddenSelectChanged = setPhoneCountryHiddenSelectValue(FIXED_PHONE_COUNTRY.key);
+  if (hiddenSelectChanged) {
+    await sleep(250);
+    const selectedDialCode = getSelectedPhoneCountryDialCode();
+    if (selectedDialCode === FIXED_PHONE_COUNTRY.dialCode) {
+      return {
+        matched: true,
+        changed: currentDialCode !== FIXED_PHONE_COUNTRY.dialCode,
+        dialCode: FIXED_PHONE_COUNTRY.dialCode,
+        countryKey: FIXED_PHONE_COUNTRY.key,
+      };
+    }
+  }
+
+  const selectButton = getPhoneCountrySelectButton();
+  if (!selectButton || !isActionEnabled(selectButton)) {
+    return { matched: false, changed: false, dialCode: currentDialCode || '' };
+  }
+
+  await humanPause(200, 500);
+  simulateClick(selectButton);
+
+  const start = Date.now();
+  let option = null;
+  while (Date.now() - start < 5000) {
+    throwIfStopped();
+    option = findFixedPhoneCountryOption();
+    if (option) {
+      break;
+    }
+    await sleep(120);
+  }
+
+  if (!option) {
+    await humanPause(100, 200);
+    simulateClick(selectButton);
+    return { matched: false, changed: false, dialCode: currentDialCode || '' };
+  }
+
+  const matchedDialCode = getPhoneCountryOptionDialCode(option) || FIXED_PHONE_COUNTRY.dialCode;
+  const matchedCountryKey = getPhoneCountryOptionKey(option);
+  log(
+    `手机号验证：已定位到固定国家选项 ${getActionText(option) || option.textContent || matchedCountryKey || matchedDialCode}`,
+    'info'
+  );
+
+  option.scrollIntoView?.({ block: 'center' });
+  await humanPause(150, 350);
+  const optionHiddenSelectChanged = matchedCountryKey ? setPhoneCountryHiddenSelectValue(matchedCountryKey) : false;
+  if (isVisibleElement(option)) {
+    simulateClick(option);
+  }
+
+  const waitSelectionStart = Date.now();
+  while (Date.now() - waitSelectionStart < 2000) {
+    throwIfStopped();
+    const selectedDialCode = getSelectedPhoneCountryDialCode();
+    if (matchedDialCode && selectedDialCode === matchedDialCode) {
+      return {
+        matched: true,
+        changed: currentDialCode !== matchedDialCode,
+        dialCode: matchedDialCode,
+        countryKey: matchedCountryKey,
+      };
+    }
+    await sleep(120);
+  }
+
+  if (optionHiddenSelectChanged || hiddenSelectChanged) {
+    await sleep(250);
+    const selectedDialCode = getSelectedPhoneCountryDialCode();
+    if (matchedDialCode && selectedDialCode === matchedDialCode) {
+      return {
+        matched: true,
+        changed: currentDialCode !== matchedDialCode,
+        dialCode: matchedDialCode,
+        countryKey: matchedCountryKey,
+      };
+    }
+  }
+
+  return {
+    matched: false,
+    changed: false,
+    dialCode: currentDialCode || matchedDialCode || '',
+    countryKey: matchedCountryKey,
+  };
+}
+
+function getSelectedPhoneCountryDialCode() {
+  const candidates = [
+    document.querySelector('button[aria-haspopup="listbox"] .react-aria-SelectValue'),
+    document.querySelector('[class*="SelectValue"]'),
+    document.querySelector('span[class*="inputDecorationCountryCode"]'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const text = (candidate.textContent || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/\+(\d{1,4})/);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return '';
+}
+
+function normalizePhoneNumberForOpenAiForm(phoneNumber = '') {
+  const raw = String(phoneNumber || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  let normalized = raw.replace(/[^\d+]/g, '');
+  const currentDialCode = getSelectedPhoneCountryDialCode();
+  if (normalized.startsWith('+')) {
+    normalized = normalized.slice(1);
+  }
+  if (currentDialCode && normalized.startsWith(currentDialCode)) {
+    normalized = normalized.slice(currentDialCode.length);
+  }
+
+  return normalized.replace(/\D/g, '');
+}
+
+function getPhoneVerificationActionButton({ allowDisabled = false } = {}) {
+  const candidates = document.querySelectorAll(
+    'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+  );
+  const codeTarget = getVerificationCodeTarget();
+  const pattern = codeTarget
+    ? /verify|confirm|submit|continue|next|确认|验证|继续|下一步/i
+    : /send|sms|text|code|verify|continue|next|submit|发送|短信|验证码|继续|下一步/i;
+
+  return Array.from(candidates).find((el) => {
+    if (!isVisibleElement(el) || (!allowDisabled && !isActionEnabled(el))) return false;
+    const text = getActionText(el);
+    if (!text) return false;
+    if (RESEND_VERIFICATION_CODE_PATTERN.test(text)) return false;
+    return pattern.test(text);
+  }) || null;
+}
+
+function dispatchReactAriaPress(el) {
+  if (!el) {
+    throw new Error('无法触发空元素。');
+  }
+
+  const rect = typeof el.getBoundingClientRect === 'function'
+    ? el.getBoundingClientRect()
+    : { left: 0, top: 0, width: 0, height: 0 };
+  const clientX = rect.left + Math.min(Math.max(rect.width / 2, 1), Math.max(rect.width - 1, 1));
+  const clientY = rect.top + Math.min(Math.max(rect.height / 2, 1), Math.max(rect.height - 1, 1));
+  const baseInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX,
+    clientY,
+    screenX: clientX,
+    screenY: clientY,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+  };
+
+  if (typeof el.focus === 'function') {
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      el.focus();
+    }
+  }
+
+  if (typeof PointerEvent === 'function') {
+    el.dispatchEvent(new PointerEvent('pointerdown', {
+      ...baseInit,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    }));
+  }
+  el.dispatchEvent(new MouseEvent('mousedown', baseInit));
+
+  if (typeof PointerEvent === 'function') {
+    el.dispatchEvent(new PointerEvent('pointerup', {
+      ...baseInit,
+      buttons: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    }));
+  }
+  el.dispatchEvent(new MouseEvent('mouseup', {
+    ...baseInit,
+    buttons: 0,
+  }));
+
+  if (typeof el.click === 'function') {
+    el.click();
+    return 'reactPress';
+  }
+
+  el.dispatchEvent(new MouseEvent('click', {
+    ...baseInit,
+    buttons: 0,
+  }));
+  return 'reactPressFallback';
+}
+
+function inspectPhoneVerificationState() {
+  const addPhonePage = isAddPhonePageReady();
+  const phoneInput = addPhonePage ? getPhoneNumberInput() : null;
+  const codeTarget = addPhonePage ? getVerificationCodeTarget() : null;
+  const actionButton = addPhonePage ? getPhoneVerificationActionButton({ allowDisabled: true }) : null;
+  const resendButton = addPhonePage ? findResendVerificationCodeTrigger({ allowDisabled: true }) : null;
+  const retryButton = addPhonePage ? getAuthRetryButton({ allowDisabled: true }) : null;
+  const errorText = addPhonePage ? getPhoneVerificationErrorText() : '';
+
+  return {
+    addPhonePage,
+    phoneInput,
+    codeTarget,
+    actionButton,
+    resendButton,
+    retryButton,
+    errorText,
+    url: location.href,
+  };
+}
+
+function serializePhoneVerificationState(snapshot) {
+  return {
+    addPhonePage: Boolean(snapshot?.addPhonePage),
+    hasPhoneInput: Boolean(snapshot?.phoneInput),
+    hasCodeTarget: Boolean(snapshot?.codeTarget),
+    hasActionButton: Boolean(snapshot?.actionButton),
+    hasResendButton: Boolean(snapshot?.resendButton),
+    hasRetryButton: Boolean(snapshot?.retryButton),
+    errorText: snapshot?.errorText || '',
+    url: snapshot?.url || location.href,
+  };
+}
+
+async function waitForPhoneVerificationPageReady(timeout = 15000) {
+  const start = Date.now();
+  let snapshot = inspectPhoneVerificationState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectPhoneVerificationState();
+    if (snapshot.addPhonePage) {
+      return snapshot;
+    }
+    await sleep(200);
+  }
+
+  throw new Error('当前未进入手机号验证页面。URL: ' + location.href);
+}
+
+async function waitForPhoneCodeEntryReady(timeout = 15000) {
+  const start = Date.now();
+  let snapshot = inspectPhoneVerificationState();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = inspectPhoneVerificationState();
+    if (!snapshot.addPhonePage) {
+      return { success: true, leftPhonePage: true, url: snapshot.url || location.href };
+    }
+    if (snapshot.codeTarget) {
+      return { success: true, codeEntryReady: true, url: snapshot.url || location.href };
+    }
+    if (snapshot.errorText) {
+      return { success: false, errorText: snapshot.errorText, url: snapshot.url || location.href };
+    }
+    await sleep(200);
+  }
+
+  return { success: false, errorText: '提交手机号后未进入短信验证码输入阶段。', url: location.href };
+}
+
+async function waitForPhoneNumberInputReady(timeout = 12000) {
+  const start = Date.now();
+  let loggedWaiting = false;
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const snapshot = inspectPhoneVerificationState();
+    if (!snapshot.addPhonePage) {
+      throw new Error('当前未进入手机号验证页面。URL: ' + location.href);
+    }
+    if (snapshot.codeTarget) {
+      return { phoneInput: null, alreadyWaitingForCode: true, url: snapshot.url || location.href };
+    }
+
+    const phoneInput = getPhoneNumberInput();
+    if (phoneInput) {
+      return { phoneInput, url: snapshot.url || location.href };
+    }
+    if (!loggedWaiting) {
+      loggedWaiting = true;
+      const totalCandidates = document.querySelectorAll(PHONE_NUMBER_INPUT_SELECTOR).length;
+      const hiddenPhoneInput = getPhoneNumberHiddenInput();
+      log(
+        `手机号验证：正在等待手机号输入框出现（候选元素 ${totalCandidates} 个，隐藏 phoneNumber 字段 ${hiddenPhoneInput ? '已找到' : '未找到'}）...`,
+        'warn'
+      );
+    }
+    await sleep(150);
+  }
+
+  throw new Error('手机号页面未找到手机号输入框。URL: ' + location.href);
+}
+
+async function submitPhoneNumber(payload = {}) {
+  const { phoneNumber } = payload;
+  if (!phoneNumber) {
+    throw new Error('未提供手机号。');
+  }
+
+  const snapshot = await waitForPhoneVerificationPageReady();
+  if (snapshot.codeTarget) {
+    return { alreadyWaitingForCode: true, url: snapshot.url || location.href };
+  }
+  const phoneEntry = await waitForPhoneNumberInputReady();
+  if (phoneEntry.alreadyWaitingForCode) {
+    return { alreadyWaitingForCode: true, url: phoneEntry.url || location.href };
+  }
+  const phoneInput = phoneEntry.phoneInput || snapshot.phoneInput || getPhoneNumberInput();
+  if (!phoneInput) {
+    throw new Error('手机号页面未找到手机号输入框。URL: ' + location.href);
+  }
+
+  const actionButton = snapshot.actionButton || getPhoneVerificationActionButton({ allowDisabled: true });
+  if (!actionButton || !isActionEnabled(actionButton)) {
+    throw new Error('手机号页面未找到可点击的发送验证码按钮。URL: ' + location.href);
+  }
+
+  const countryMatch = await ensurePhoneCountryMatchesNumber(phoneNumber);
+  if (countryMatch.matched) {
+    log(
+      `手机号验证：已${countryMatch.changed ? '自动切换' : '确认'}国家区号 +${countryMatch.dialCode || getSelectedPhoneCountryDialCode() || '?'}`,
+      'info'
+    );
+  } else {
+    log('手机号验证：未能自动匹配国家区号，将按当前页面已选国家继续填写。', 'warn');
+  }
+
+  await humanPause(450, 1100);
+  const fullDigitsPhoneNumber = getPhoneDigits(phoneNumber);
+  const hiddenPhoneInput = getPhoneNumberHiddenInput();
+  fillInput(phoneInput, fullDigitsPhoneNumber || phoneNumber);
+  if (hiddenPhoneInput) {
+    const hiddenValue = fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim();
+    fillInput(hiddenPhoneInput, hiddenValue);
+  }
+  log(`手机号验证：已填写完整手机号 ${fullDigitsPhoneNumber || phoneNumber}`);
+  await sleep(500);
+  const latestActionButton = getPhoneVerificationActionButton({ allowDisabled: true }) || actionButton;
+  if (!latestActionButton || !isActionEnabled(latestActionButton)) {
+    throw new Error('手机号页面未找到可点击的继续按钮。URL: ' + location.href);
+  }
+  await humanPause(300, 800);
+  simulateClick(latestActionButton);
+  log('手机号验证：已提交手机号，正在等待短信验证码输入框...');
+  return waitForPhoneCodeEntryReady();
+}
+
+async function waitForPhoneCodeSubmitOutcome(timeout = 30000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const snapshot = inspectPhoneVerificationState();
+    if (!snapshot.addPhonePage || isStep8Ready()) {
+      return { success: true, url: snapshot.url || location.href };
+    }
+    if (snapshot.errorText) {
+      return { invalidCode: true, errorText: snapshot.errorText, url: snapshot.url || location.href };
+    }
+    await sleep(150);
+  }
+
+  const snapshot = inspectPhoneVerificationState();
+  if (!snapshot.addPhonePage || isStep8Ready()) {
+    return { success: true, url: snapshot.url || location.href, assumed: true };
+  }
+
+  return {
+    invalidCode: true,
+    errorText: snapshot.errorText || '提交短信验证码后仍停留在手机号页面。',
+    url: snapshot.url || location.href,
+  };
+}
+
+async function waitForPhoneCodeSubmitAttempt(timeout = 3500) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const snapshot = inspectPhoneVerificationState();
+    if (!snapshot.addPhonePage || isStep8Ready()) {
+      return { settled: true, success: true, url: snapshot.url || location.href };
+    }
+    if (snapshot.errorText) {
+      return {
+        settled: true,
+        invalidCode: true,
+        errorText: snapshot.errorText,
+        url: snapshot.url || location.href,
+      };
+    }
+    await sleep(150);
+  }
+
+  return {
+    settled: false,
+    url: location.href,
+  };
+}
+
+async function fillPhoneVerificationCode(payload = {}) {
+  const { code } = payload;
+  if (!code) {
+    throw new Error('未提供短信验证码。');
+  }
+
+  const snapshot = await waitForPhoneVerificationPageReady();
+  const target = snapshot.codeTarget || getVerificationCodeTarget();
+  if (!target) {
+    throw new Error('手机号页面未找到短信验证码输入框。URL: ' + location.href);
+  }
+
+  log(`手机号验证：正在填写短信验证码 ${code}`);
+
+  if (target.type === 'split' && Array.isArray(target.elements)) {
+    for (let i = 0; i < Math.min(6, target.elements.length, code.length); i += 1) {
+      fillInput(target.elements[i], code[i]);
+      await sleep(80);
+    }
+  } else if (target.element) {
+    fillInput(target.element, code);
+  } else {
+    throw new Error('手机号页面验证码输入框不可用。URL: ' + location.href);
+  }
+
+  await sleep(1200);
+  const autoSubmitOutcome = await waitForPhoneCodeSubmitAttempt(4000);
+  if (autoSubmitOutcome.settled) {
+    if (autoSubmitOutcome.success) {
+      log('手机号验证：页面已自动提交短信验证码。');
+    }
+    return autoSubmitOutcome;
+  }
+
+  const actionButton = getPhoneVerificationActionButton({ allowDisabled: true });
+  if (actionButton && isActionEnabled(actionButton)) {
+    await humanPause(300, 800);
+    const triggerMethod = dispatchReactAriaPress(actionButton);
+    log(`手机号验证：已通过 ${triggerMethod} 提交短信验证码。`);
+  }
+
+  return waitForPhoneCodeSubmitOutcome();
+}
+
+async function resendPhoneVerificationCode() {
+  const snapshot = await waitForPhoneVerificationPageReady();
+  const resendButton = snapshot.resendButton || findResendVerificationCodeTrigger({ allowDisabled: true });
+  if (!resendButton || !isActionEnabled(resendButton)) {
+    return { resent: false, reason: 'button_unavailable', url: snapshot.url || location.href };
+  }
+
+  await humanPause(300, 800);
+  const triggerMethod = dispatchReactAriaPress(resendButton);
+  log(`手机号验证：已通过 ${triggerMethod} 点击页面上的重新发送验证码按钮。`);
+  await sleep(1200);
+  return { resent: true, url: location.href };
+}
+
+async function waitForPhoneEntryAfterRetry(timeout = 15000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const snapshot = inspectPhoneVerificationState();
+    if (snapshot.phoneInput) {
+      return {
+        clicked: true,
+        ready: true,
+        hasPhoneInput: true,
+        url: snapshot.url || location.href,
+      };
+    }
+    if (snapshot.codeTarget) {
+      return {
+        clicked: true,
+        ready: true,
+        alreadyWaitingForCode: true,
+        url: snapshot.url || location.href,
+      };
+    }
+    await sleep(200);
+  }
+
+  const snapshot = inspectPhoneVerificationState();
+  return {
+    clicked: true,
+    ready: false,
+    hasPhoneInput: Boolean(snapshot.phoneInput),
+    alreadyWaitingForCode: Boolean(snapshot.codeTarget),
+    hasRetryButton: Boolean(snapshot.retryButton),
+    errorText: snapshot.errorText || '',
+    url: snapshot.url || location.href,
+  };
+}
+
+async function clickPhoneVerificationRetry(_payload = {}) {
+  const snapshot = await waitForPhoneVerificationPageReady();
+  const retryButton = snapshot.retryButton || getAuthRetryButton({ allowDisabled: true });
+  if (!retryButton || !isActionEnabled(retryButton)) {
+    return {
+      clicked: false,
+      reason: 'button_unavailable',
+      errorText: snapshot.errorText || '',
+      url: snapshot.url || location.href,
+    };
+  }
+
+  await humanPause(300, 800);
+  const triggerMethod = dispatchReactAriaPress(retryButton);
+  log(`手机号验证：已通过 ${triggerMethod} 点击“重试”按钮。`);
+  await sleep(1200);
+  return waitForPhoneEntryAfterRetry();
 }
 
 function isStep8Ready() {

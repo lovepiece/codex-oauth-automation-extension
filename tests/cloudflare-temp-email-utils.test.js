@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildCloudflareTempEmailHeaders,
+  deriveCloudflareTempEmailRootDomain,
   getCloudflareTempEmailAddressFromResponse,
   normalizeCloudflareTempEmailBaseUrl,
   normalizeCloudflareTempEmailDomain,
@@ -28,6 +29,21 @@ test('normalizeCloudflareTempEmailDomain and domains de-duplicate valid entries'
   assert.deepEqual(
     normalizeCloudflareTempEmailDomains(['mail.example.com', 'MAIL.EXAMPLE.COM', 'bad-value']),
     ['mail.example.com']
+  );
+});
+
+test('deriveCloudflareTempEmailRootDomain infers a root domain from the worker base URL', () => {
+  assert.equal(
+    deriveCloudflareTempEmailRootDomain('https://worker.iobsessy.com'),
+    'iobsessy.com'
+  );
+  assert.equal(
+    deriveCloudflareTempEmailRootDomain('https://api.mail.example.com/base'),
+    'mail.example.com'
+  );
+  assert.equal(
+    deriveCloudflareTempEmailRootDomain('http://127.0.0.1:8787'),
+    ''
   );
 });
 

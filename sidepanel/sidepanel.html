@@ -118,16 +118,16 @@
       </div>
       <div class="data-row" id="row-local-cpa-step9-mode">
         <span class="data-label">本地 CPA</span>
-        <div id="local-cpa-step9-mode-group" class="choice-group" role="group" aria-label="本地 CPA 第 9 步策略">
+        <div id="local-cpa-step9-mode-group" class="choice-group" role="group" aria-label="本地 CPA 第 10 步策略">
           <button type="button" class="choice-btn" data-local-cpa-step9-mode="submit">全部回调</button>
-          <button type="button" class="choice-btn" data-local-cpa-step9-mode="bypass">跳过第9步</button>
+          <button type="button" class="choice-btn" data-local-cpa-step9-mode="bypass">跳过第10步</button>
         </div>
       </div>
       <div class="data-row" id="row-cpa-callback-mode">
         <span class="data-label">CPA回调</span>
         <div id="cpa-callback-mode-group" class="choice-group" role="group" aria-label="CPA 回调阶段">
           <button type="button" class="choice-btn" data-cpa-callback-mode="step6">第六步回调</button>
-          <button type="button" class="choice-btn" data-cpa-callback-mode="step8">第八步回调</button>
+          <button type="button" class="choice-btn" data-cpa-callback-mode="step8">第九步回调</button>
         </div>
       </div>
       <div class="data-row" id="row-sub2api-url" style="display:none;">
@@ -209,10 +209,22 @@
       <div class="data-row" id="row-temp-email-domain" style="display:none;">
         <span class="data-label">Temp 域名</span>
         <div class="data-inline">
-          <select id="select-temp-email-domain" class="data-select"></select>
-          <input type="text" id="input-temp-email-domain" class="data-input" placeholder="例如 mail.example.com"
-            style="display:none;" />
-          <button id="btn-temp-email-domain-mode" class="btn btn-outline btn-sm" type="button">添加</button>
+          <input type="text" id="input-temp-email-domain" class="data-input" placeholder="根域名可选；例如 iobsessy.com，不填则由 Worker 地址自动推导" />
+          <label class="toggle-switch" for="checkbox-temp-email-use-subdomain" title="启用二级域名">
+            <input type="checkbox" id="checkbox-temp-email-use-subdomain" />
+            <span class="toggle-switch-track" aria-hidden="true">
+              <span class="toggle-switch-thumb"></span>
+            </span>
+          </label>
+          <span class="data-unit">二级域名</span>
+          <input type="text" id="input-temp-email-subdomain" class="data-input" placeholder="二级域名；留空随机，例如 team01" />
+        </div>
+      </div>
+      <div class="data-row" id="row-temp-email-inbox-tools" style="display:none;">
+        <span class="data-label">Temp 收件</span>
+        <div class="data-inline data-value-actions">
+          <button id="btn-temp-email-read-latest" class="btn btn-outline btn-sm data-inline-btn" type="button">读取验证码</button>
+          <span id="display-temp-email-latest" class="data-value data-value-fill mono truncate">填写注册邮箱或“邮件接收”邮箱后，可读取最新验证码</span>
         </div>
       </div>
       <div class="data-row" id="row-cf-domain" style="display:none;">
@@ -263,6 +275,13 @@
         </div>
       </div>
       <div class="data-row">
+        <span class="data-label">失败处理</span>
+        <select id="select-auto-retry-mode" class="data-select">
+          <option value="retry">自动重试</option>
+          <option value="pause">暂停后手动继续</option>
+        </select>
+      </div>
+      <div class="data-row">
         <span class="data-label">延迟</span>
         <div class="data-inline auto-delay-inline">
           <div class="auto-delay-side auto-delay-side-left">
@@ -289,6 +308,10 @@
         </div>
       </div>
       <div class="data-row">
+        <span class="data-label">跳过步骤</span>
+        <input type="text" id="input-auto-skip-steps" class="data-input" placeholder="可选；例如 2,3,5 表示自动跳过这些步骤" />
+      </div>
+      <div class="data-row">
       <span class="data-label">OAuth</span>
       <span id="display-oauth-url" class="data-value mono truncate">等待中...</span>
     </div>
@@ -299,6 +322,67 @@
         <button id="btn-save-settings" class="btn btn-outline btn-sm data-inline-btn" type="button">保存</button>
       </div>
     </div>
+    </div>
+    <div id="hero-sms-section" class="data-card hero-sms-card">
+      <div class="section-mini-header">
+        <div class="section-mini-copy">
+          <span class="section-label">HeroSMS 接码</span>
+        </div>
+        <div class="section-mini-actions">
+          <button id="btn-hero-sms-resend" class="btn btn-outline btn-xs" type="button">重新获取验证码</button>
+        </div>
+      </div>
+      <div class="data-row">
+        <span class="data-label">API 地址</span>
+        <input type="text" id="input-hero-sms-base-url" class="data-input mono" placeholder="https://hero-sms.com/stubs/handler_api.php" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">API Key</span>
+        <input type="password" id="input-hero-sms-api-key" class="data-input mono" placeholder="请输入 HeroSMS API Key" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">服务</span>
+        <input type="text" id="input-hero-sms-service" class="data-input mono" placeholder="例如 openai / oaipro" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">国家</span>
+        <input type="text" id="input-hero-sms-country" class="data-input mono" placeholder="国家代码，例如 6" />
+      </div>
+      <div class="hero-sms-runtime-card">
+        <div class="data-row">
+          <span class="data-label">当前号码</span>
+          <span id="display-hero-sms-phone" class="data-value data-value-fill mono truncate">等待进入手机号页面</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">剩余时间</span>
+          <span id="display-hero-sms-remaining" class="data-value mono">未分配</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">成功次数</span>
+          <span id="display-hero-sms-usage" class="data-value mono">0/5</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">最近验证码</span>
+          <span id="display-hero-sms-code" class="data-value mono">等待中</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">最近状态</span>
+          <span id="display-hero-sms-status" class="data-value data-value-fill mono truncate">未开始</span>
+        </div>
+      </div>
+      <div class="hero-sms-failed-card">
+        <div class="section-mini-header">
+          <div class="section-mini-copy">
+            <span class="section-label">失败号码列表</span>
+          </div>
+          <div class="section-mini-actions">
+            <span id="display-hero-sms-failed-count" class="data-value mono">0</span>
+          </div>
+        </div>
+        <div id="hero-sms-failed-list" class="hero-sms-failed-list">
+          <div class="hero-sms-failed-empty">暂无失败号码记录。</div>
+        </div>
+      </div>
     </div>
     <div id="hotmail-section" class="data-card hotmail-card" style="display:none;">
       <div class="section-mini-header">
@@ -524,7 +608,7 @@
   <section id="steps-section">
     <div class="steps-header">
       <span class="section-label">流程</span>
-      <span id="steps-progress" class="steps-progress">0 / 9</span>
+      <span id="steps-progress" class="steps-progress">0 / 10</span>
     </div>
     <div class="steps-list">
       <div class="step-row" data-step="1">
@@ -564,13 +648,18 @@
       </div>
       <div class="step-row" data-step="8">
         <div class="step-indicator" data-step="8"><span class="step-num">8</span></div>
-        <button class="step-btn" data-step="8">自动确认 OAuth</button>
+        <button class="step-btn" data-step="8">验证手机号</button>
         <span class="step-status" data-step="8"></span>
       </div>
       <div class="step-row" data-step="9">
         <div class="step-indicator" data-step="9"><span class="step-num">9</span></div>
-        <button class="step-btn" data-step="9">平台回调验证</button>
+        <button class="step-btn" data-step="9">自动确认 OAuth</button>
         <span class="step-status" data-step="9"></span>
+      </div>
+      <div class="step-row" data-step="10">
+        <div class="step-indicator" data-step="10"><span class="step-num">10</span></div>
+        <button class="step-btn" data-step="10">平台回调验证</button>
+        <span class="step-status" data-step="10"></span>
       </div>
     </div>
   </section>

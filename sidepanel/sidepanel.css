@@ -471,6 +471,75 @@ header {
   box-shadow: var(--shadow-sm);
 }
 
+.hero-sms-card {
+  margin-top: 12px;
+}
+
+.hero-sms-runtime-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue-soft) 55%, transparent), transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hero-sms-failed-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hero-sms-failed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hero-sms-failed-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hero-sms-failed-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.hero-sms-failed-phone {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.hero-sms-failed-status {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.hero-sms-failed-detail {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.hero-sms-failed-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .data-card.is-locked {
   position: relative;
   overflow: hidden;
@@ -528,6 +597,11 @@ header {
   gap: 8px;
   flex: 1;
   min-width: 0;
+}
+
+#row-temp-email-domain .data-inline {
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .data-value-actions {
