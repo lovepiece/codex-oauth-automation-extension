@@ -30,6 +30,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'FILL_PHONE_VERIFICATION_CODE'
       || message.type === 'RESEND_PHONE_VERIFICATION_CODE'
       || message.type === 'CLICK_PHONE_VERIFICATION_RETRY'
+      || message.type === 'GO_BACK_TO_PHONE_NUMBER_ENTRY'
     ) {
       resetStopState();
       handleCommand(message).then((result) => {
@@ -101,6 +102,8 @@ async function handleCommand(message) {
       return await resendPhoneVerificationCode();
     case 'CLICK_PHONE_VERIFICATION_RETRY':
       return await clickPhoneVerificationRetry(message.payload);
+    case 'GO_BACK_TO_PHONE_NUMBER_ENTRY':
+      return await goBackToPhoneNumberEntry(message.payload);
     case 'STEP8_FIND_AND_CLICK':
       return await step8_findAndClick();
     case 'STEP8_GET_STATE':
@@ -639,6 +642,8 @@ const AUTH_TIMEOUT_ERROR_TITLE_PATTERN = /糟糕，出错了|something\s+went\s+
 const AUTH_TIMEOUT_ERROR_DETAIL_PATTERN = /operation\s+timed\s+out|timed\s+out|请求超时|操作超时/i;
 const SIGNUP_EMAIL_EXISTS_PATTERN = /user[_\s-]*already[_\s-]*exists|与此电子邮件地址相关联的帐户已存在|account\s+associated\s+with\s+this\s+email\s+address\s+already\s+exists|email\s+address.*already\s+exists/i;
 const PHONE_MAX_USAGE_EXCEEDED_PATTERN = /phone_max_usage_exceeded/i;
+const PHONE_RESEND_RATE_LIMIT_PATTERN = /尝试重新发送的次数过多。?\s*请稍后重试。?|too\s+many\s+(?:times\s+to\s+)?resend|too\s+many\s+resend\s+attempts?/i;
+const PHONE_SMS_UNAVAILABLE_PATTERN = /无法向此电话号码发送短信|unable\s+to\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number|cannot\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number/i;
 
 function getVerificationErrorText() {
   const messages = [];
@@ -681,12 +686,33 @@ function getPhoneVerificationErrorText() {
   }
 
   const pageText = getPageTextSnapshot();
-  if (!PHONE_MAX_USAGE_EXCEEDED_PATTERN.test(pageText)) {
-    return '';
+  const resendLimitMatch = pageText.match(/尝试重新发送的次数过多。?\s*请稍后重试。?|too\s+many\s+(?:times\s+to\s+)?resend|too\s+many\s+resend\s+attempts?/i);
+  if (resendLimitMatch) {
+    return resendLimitMatch[0];
   }
 
-  const match = pageText.match(/验证过程中出错\s*\(\s*phone_max_usage_exceeded\s*\)\s*。?\s*请重试。?|phone_max_usage_exceeded/i);
-  return match ? match[0] : 'phone_max_usage_exceeded';
+  const smsUnavailableMatch = pageText.match(/无法向此电话号码发送短信|unable\s+to\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number|cannot\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number/i);
+  if (smsUnavailableMatch) {
+    return smsUnavailableMatch[0];
+  }
+
+  if (PHONE_MAX_USAGE_EXCEEDED_PATTERN.test(pageText)) {
+    const match = pageText.match(/验证过程中出错\s*\(\s*phone_max_usage_exceeded\s*\)\s*。?\s*请重试。?|phone_max_usage_exceeded/i);
+    return match ? match[0] : 'phone_max_usage_exceeded';
+  }
+
+  return '';
+}
+
+function isPhoneVerificationFreshNumberErrorText(text = '') {
+  const normalizedText = String(text || '').trim();
+  if (!normalizedText) {
+    return false;
+  }
+
+  return PHONE_MAX_USAGE_EXCEEDED_PATTERN.test(normalizedText)
+    || PHONE_RESEND_RATE_LIMIT_PATTERN.test(normalizedText)
+    || PHONE_SMS_UNAVAILABLE_PATTERN.test(normalizedText);
 }
 
 function isStep5Ready() {
@@ -1226,6 +1252,9 @@ async function waitForPhoneCodeEntryReady(timeout = 15000) {
     if (!snapshot.addPhonePage) {
       return { success: true, leftPhonePage: true, url: snapshot.url || location.href };
     }
+    if (snapshot.errorText && isPhoneVerificationFreshNumberErrorText(snapshot.errorText)) {
+      return { success: false, errorText: snapshot.errorText, url: snapshot.url || location.href };
+    }
     if (snapshot.codeTarget) {
       return { success: true, codeEntryReady: true, url: snapshot.url || location.href };
     }
@@ -1425,14 +1454,24 @@ async function resendPhoneVerificationCode() {
   const snapshot = await waitForPhoneVerificationPageReady();
   const resendButton = snapshot.resendButton || findResendVerificationCodeTrigger({ allowDisabled: true });
   if (!resendButton || !isActionEnabled(resendButton)) {
-    return { resent: false, reason: 'button_unavailable', url: snapshot.url || location.href };
+    return {
+      resent: false,
+      reason: 'button_unavailable',
+      errorText: snapshot.errorText || '',
+      url: snapshot.url || location.href,
+    };
   }
 
   await humanPause(300, 800);
   const triggerMethod = dispatchReactAriaPress(resendButton);
   log(`手机号验证：已通过 ${triggerMethod} 点击页面上的重新发送验证码按钮。`);
   await sleep(1200);
-  return { resent: true, url: location.href };
+  const latestSnapshot = inspectPhoneVerificationState();
+  return {
+    resent: true,
+    errorText: latestSnapshot.errorText || '',
+    url: latestSnapshot.url || location.href,
+  };
 }
 
 async function waitForPhoneEntryAfterRetry(timeout = 15000) {
@@ -1489,6 +1528,47 @@ async function clickPhoneVerificationRetry(_payload = {}) {
   log(`手机号验证：已通过 ${triggerMethod} 点击“重试”按钮。`);
   await sleep(1200);
   return waitForPhoneEntryAfterRetry();
+}
+
+async function goBackToPhoneNumberEntry(_payload = {}) {
+  const snapshot = inspectPhoneVerificationState();
+  if (snapshot.phoneInput) {
+    return {
+      navigated: false,
+      ready: true,
+      hasPhoneInput: true,
+      url: snapshot.url || location.href,
+    };
+  }
+
+  history.back();
+  log('手机号验证：已后退页面，正在返回手机号填写页。');
+  await sleep(1200);
+
+  const start = Date.now();
+  while (Date.now() - start < 15000) {
+    throwIfStopped();
+    const latestSnapshot = inspectPhoneVerificationState();
+    if (latestSnapshot.phoneInput) {
+      return {
+        navigated: true,
+        ready: true,
+        hasPhoneInput: true,
+        url: latestSnapshot.url || location.href,
+      };
+    }
+    await sleep(200);
+  }
+
+  const latestSnapshot = inspectPhoneVerificationState();
+  return {
+    navigated: true,
+    ready: false,
+    hasPhoneInput: Boolean(latestSnapshot.phoneInput),
+    hasCodeTarget: Boolean(latestSnapshot.codeTarget),
+    errorText: latestSnapshot.errorText || '',
+    url: latestSnapshot.url || location.href,
+  };
 }
 
 function isStep8Ready() {

@@ -1432,6 +1432,9 @@ async function waitForHeroSmsCode(state, activation, options = {}) {
           activation: currentActivation,
         });
       } catch (err) {
+        if (err?.abortPolling) {
+          throw err;
+        }
         await addLog(`HeroSMS：第 ${resendAttempts} 次请求新短信失败：${err.message}`, 'warn');
       }
     } else {
@@ -3749,9 +3752,49 @@ function isPhoneMaxUsageExceededErrorText(text = '') {
   return /phone_max_usage_exceeded/i.test(String(text || '').trim());
 }
 
-function shouldRetryStep8WithFreshHeroSmsNumber(error) {
+function isPhoneResendRateLimitedErrorText(text = '') {
+  return /尝试重新发送的次数过多。?\s*请稍后重试。?|too\s+many\s+(?:times\s+to\s+)?resend|too\s+many\s+resend\s+attempts?/i.test(String(text || '').trim());
+}
+
+function isPhoneSmsUnavailableErrorText(text = '') {
+  return /无法向此电话号码发送短信|unable\s+to\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number|cannot\s+send\s+(?:an\s+)?sms\s+to\s+this\s+phone\s+number/i.test(String(text || '').trim());
+}
+
+function getStep8FreshNumberFailureReason(error) {
   const text = String(error?.errorText || error?.message || error || '').trim();
-  return isPhoneMaxUsageExceededErrorText(text);
+  if (!text) {
+    return null;
+  }
+
+  if (isPhoneMaxUsageExceededErrorText(text)) {
+    return {
+      code: 'phone_max_usage_exceeded',
+      label: 'phone_max_usage_exceeded',
+      recovery: 'retry_button',
+    };
+  }
+
+  if (isPhoneResendRateLimitedErrorText(text)) {
+    return {
+      code: 'phone_resend_rate_limited',
+      label: '页面提示重发短信次数过多',
+      recovery: 'history_back',
+    };
+  }
+
+  if (isPhoneSmsUnavailableErrorText(text)) {
+    return {
+      code: 'phone_sms_unavailable',
+      label: '页面提示当前号码无法接收短信',
+      recovery: 'history_back',
+    };
+  }
+
+  return null;
+}
+
+function shouldRetryStep8WithFreshHeroSmsNumber(error) {
+  return Boolean(getStep8FreshNumberFailureReason(error));
 }
 
 async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload = {}) {
@@ -9460,6 +9503,22 @@ async function triggerPhoneVerificationRetryOnPage(tabId) {
   return result || {};
 }
 
+async function goBackToPhoneNumberEntryOnPage(tabId) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'GO_BACK_TO_PHONE_NUMBER_ENTRY',
+    source: 'background',
+    payload: {},
+  }, {
+    timeoutMs: 20000,
+    retryDelayMs: 600,
+    logMessage: '手机号页面正在切换，等待返回手机号填写页...',
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || {};
+}
+
 async function handleHeroSmsPhonePageDuringStep8(tabId) {
   for (let attempt = 1; attempt <= HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT; attempt += 1) {
     const state = await getState();
@@ -9503,7 +9562,19 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
             } else {
               await addLog('步骤 8：页面上的“重新发送短信”按钮暂不可用，本次仅请求 HeroSMS 侧重发。', 'warn');
             }
+
+            if (resendPageResult?.errorText) {
+              const pageResendError = new Error(`页面重发短信被拒绝：${resendPageResult.errorText}`);
+              pageResendError.errorText = resendPageResult.errorText;
+              pageResendError.abortPolling = shouldRetryStep8WithFreshHeroSmsNumber(pageResendError);
+              if (pageResendError.abortPolling) {
+                throw pageResendError;
+              }
+            }
           } catch (err) {
+            if (err?.abortPolling) {
+              throw err;
+            }
             await addLog(`步骤 8：页面重发短信失败：${err.message}`, 'warn');
           }
 
@@ -9531,19 +9602,20 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
       await setState({ heroSmsPendingSuccessActivationId: 0 });
       await setHeroSmsRuntimeStatusState(`手机号验证失败：${err.message}`);
 
-      const shouldRetryWithFreshNumber = shouldRetryStep8WithFreshHeroSmsNumber(err);
+      const failureReason = getStep8FreshNumberFailureReason(err);
+      const shouldRetryWithFreshNumber = Boolean(failureReason);
       const latestState = await getState();
       const currentActivation = getCurrentHeroSmsActivation(latestState);
 
       if (shouldRetryWithFreshNumber && currentActivation && currentActivation.activationId === activation.activationId) {
         await addLog(
-          `步骤 8：检测到 phone_max_usage_exceeded，当前 HeroSMS 号码 ${activation.phoneNumber} 不再复用，正在申请新号码（${attempt}/${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT}）...`,
+          `步骤 8：检测到${failureReason?.label || '当前号码不可继续使用'}，当前 HeroSMS 号码 ${activation.phoneNumber} 不再复用，正在申请新号码（${attempt}/${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT}）...`,
           'warn'
         );
         try {
           await moveHeroSmsActivationToFailedList(
             activation,
-            'phone_max_usage_exceeded',
+            failureReason?.code || 'phone_verification_failed',
             String(err?.errorText || err?.message || '').trim()
           );
           await addLog(
@@ -9551,23 +9623,37 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
             'warn'
           );
         } catch (listErr) {
-          await addLog(`步骤 8：记录 phone_max_usage_exceeded 失败号码时出错：${listErr.message}`, 'warn');
+          await addLog(`步骤 8：记录失败号码时出错：${listErr.message}`, 'warn');
         }
 
         try {
-          const retryPageResult = await triggerPhoneVerificationRetryOnPage(tabId);
-          if (retryPageResult?.clicked) {
-            await addLog(
-              retryPageResult?.ready
-                ? '步骤 8：已点击页面“重试”按钮，页面已回到手机号填写阶段。'
-                : '步骤 8：已点击页面“重试”按钮，页面正在返回手机号填写阶段...',
-              'warn'
-            );
-          } else {
-            await addLog('步骤 8：当前未找到可点击的“重试”按钮，将直接继续等待页面回到手机号填写阶段。', 'warn');
+          if (failureReason?.recovery === 'retry_button') {
+            const retryPageResult = await triggerPhoneVerificationRetryOnPage(tabId);
+            if (retryPageResult?.clicked) {
+              await addLog(
+                retryPageResult?.ready
+                  ? '步骤 8：已点击页面“重试”按钮，页面已回到手机号填写阶段。'
+                  : '步骤 8：已点击页面“重试”按钮，页面正在返回手机号填写阶段...',
+                'warn'
+              );
+            } else {
+              await addLog('步骤 8：当前未找到可点击的“重试”按钮，将直接继续等待页面回到手机号填写阶段。', 'warn');
+            }
+          } else if (failureReason?.recovery === 'history_back') {
+            const backResult = await goBackToPhoneNumberEntryOnPage(tabId);
+            if (backResult?.ready) {
+              await addLog('步骤 8：已后退回手机号填写页，准备重新申请新号码。', 'warn');
+            } else {
+              await addLog('步骤 8：已尝试后退回手机号填写页，但页面仍在切换，下一轮将继续申请新号码。', 'warn');
+            }
           }
         } catch (retryErr) {
-          await addLog(`步骤 8：点击页面“重试”按钮失败：${retryErr.message}`, 'warn');
+          await addLog(
+            failureReason?.recovery === 'history_back'
+              ? `步骤 8：后退回手机号填写页失败：${retryErr.message}`
+              : `步骤 8：点击页面“重试”按钮失败：${retryErr.message}`,
+            'warn'
+          );
         }
 
         if (attempt < HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT) {
@@ -9587,7 +9673,7 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
     }
   }
 
-  throw new Error(`步骤 8：连续 ${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT} 次触发 phone_max_usage_exceeded，未能申请到可用手机号。`);
+  throw new Error(`步骤 8：连续 ${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT} 次触发手机号不可用错误，未能申请到可用手机号。`);
 }
 
 async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS) {
