@@ -135,6 +135,7 @@ const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
 const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
 const HERO_SMS_NUMBER_MAX_USES = 5;
 const HERO_SMS_ACTIVATION_TTL_MS = 20 * 60 * 1000;
+const HERO_SMS_STANDBY_RETRY_DELAY_MS = 5 * 60 * 1000;
 const HERO_SMS_SMS_POLL_INTERVAL_MS = 5000;
 const HERO_SMS_SMS_TIMEOUT_MS = 180000;
 const HERO_SMS_RESEND_AFTER_MS = 60000;
@@ -243,6 +244,7 @@ const STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS = 10000;
 const HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT = 3;
 const HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS = 2 * 60 * 1000;
 const HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX = 'hero-sms-failed-cleanup:';
+let heroSmsCountryCatalogPromise = null;
 const PRE_LOGIN_COOKIE_CLEAR_DOMAINS = [
   'chatgpt.com',
   'chat.openai.com',
@@ -292,7 +294,10 @@ const DEFAULT_STATE = {
   currentHeroSmsActivation: null,
   heroSmsLastCode: '',
   heroSmsRuntimeStatus: '',
+  heroSmsActiveActivations: [],
+  heroSmsActiveActivationsFetchedAt: 0,
   heroSmsFailedActivations: [],
+  heroSmsStandbyActivations: [],
   heroSmsPendingSuccessActivationId: 0,
   autoRunResumeFreshAttempt: false,
   luckmailUsedPurchases: {},
@@ -416,6 +421,91 @@ function normalizeHeroSmsCountry(value = '') {
   return String(Math.max(0, Number(rawValue)));
 }
 
+function normalizeHeroSmsCountryCatalogEntry(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const id = normalizeHeroSmsCountry(value.id);
+  if (!id) {
+    return null;
+  }
+
+  const eng = String(value.eng || '').trim();
+  const chn = String(value.chn || '').trim();
+  const rus = String(value.rus || '').trim();
+  const names = [];
+  const seen = new Set();
+  for (const item of [chn, eng, rus]) {
+    const normalized = String(item || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(normalized);
+  }
+
+  return {
+    id,
+    eng,
+    chn,
+    rus,
+    names,
+  };
+}
+
+async function loadHeroSmsCountryCatalog() {
+  if (!heroSmsCountryCatalogPromise) {
+    heroSmsCountryCatalogPromise = (async () => {
+      const response = await fetch(chrome.runtime.getURL('data/SMS-Country.json'));
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      if (!Array.isArray(payload)) {
+        throw new Error('SMS-Country.json 格式无效。');
+      }
+
+      return payload
+        .map((entry) => normalizeHeroSmsCountryCatalogEntry(entry))
+        .filter(Boolean);
+    })().catch((err) => {
+      heroSmsCountryCatalogPromise = null;
+      throw err;
+    });
+  }
+
+  return heroSmsCountryCatalogPromise;
+}
+
+async function getHeroSmsCountrySelection(countryValue = '') {
+  const countryId = normalizeHeroSmsCountry(countryValue);
+  if (!countryId) {
+    return null;
+  }
+
+  try {
+    const catalog = await loadHeroSmsCountryCatalog();
+    const match = catalog.find((entry) => entry.id === countryId);
+    if (!match) {
+      return null;
+    }
+
+    return {
+      id: match.id,
+      name: match.chn || match.eng || match.rus || '',
+      eng: match.eng,
+      chn: match.chn,
+      rus: match.rus,
+      names: Array.isArray(match.names) ? [...match.names] : [],
+    };
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to load HeroSMS country catalog:', err?.message || err);
+    return null;
+  }
+}
+
 function normalizeHeroSmsActivation(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -480,6 +570,103 @@ function normalizeHeroSmsFailedActivation(value = null) {
     cleanupError: String(value.cleanupError || '').trim(),
     cleanupAttemptedAt: Number(value.cleanupAttemptedAt) || 0,
     cleanupCompletedAt: Number(value.cleanupCompletedAt) || 0,
+  };
+}
+
+function normalizeHeroSmsStandbyActivation(value = null) {
+  const normalizedActivation = normalizeHeroSmsActivation(value);
+  if (!normalizedActivation) {
+    return null;
+  }
+
+  const standbyAt = Number(value.standbyAt) || Date.now();
+  const retryAt = Number(value.retryAt) || (standbyAt + HERO_SMS_STANDBY_RETRY_DELAY_MS);
+
+  return {
+    ...normalizedActivation,
+    standbyAt,
+    retryAt,
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'waiting_retry').trim() || 'waiting_retry',
+    retryCount: Math.max(0, Math.floor(Number(value.retryCount) || 0)),
+    lastSelectedAt: Number(value.lastSelectedAt) || 0,
+  };
+}
+
+function normalizeHeroSmsActiveActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(
+    value.activationId
+    ?? value.activation_id
+    ?? value.id
+    ?? value.orderId
+    ?? value.order_id
+  );
+  if (!Number.isInteger(activationId) || activationId <= 0) {
+    return null;
+  }
+
+  const phoneNumber = String(
+    value.phoneNumber
+    ?? value.phone_number
+    ?? value.number
+    ?? value.phone
+    ?? value.msisdn
+    ?? ''
+  ).trim();
+  const acquiredAt = Number(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? value.issuedAt
+    ?? value.issued_at
+    ?? 0
+  ) || Date.parse(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? value.issuedAt
+    ?? value.issued_at
+    ?? ''
+  ) || 0;
+  const expiresAt = Number(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? 0
+  ) || Date.parse(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? ''
+  ) || 0;
+
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service ?? value.serviceCode ?? value.service_code ?? ''),
+    country: normalizeHeroSmsCountry(value.country ?? value.countryCode ?? value.country_code ?? value.countryId ?? value.country_id ?? ''),
+    status: String(value.status ?? value.state ?? value.activationStatus ?? '').trim(),
+    acquiredAt,
+    expiresAt,
+    smsCode: String(value.smsCode ?? value.code ?? '').trim(),
+    smsText: String(value.smsText ?? value.text ?? '').trim(),
+    cost: String(value.activationCost ?? value.cost ?? '').trim(),
+    raw: value,
   };
 }
 
@@ -882,6 +1069,24 @@ async function setHeroSmsRuntimeStatusState(status = '') {
   return normalizedStatus;
 }
 
+function getHeroSmsActiveActivations(state = {}) {
+  return normalizeHeroSmsActiveActivationList(state.heroSmsActiveActivations);
+}
+
+async function setHeroSmsActiveActivationsState(list = [], fetchedAt = Date.now()) {
+  const normalizedList = normalizeHeroSmsActiveActivationList(list);
+  const normalizedFetchedAt = Number(fetchedAt) || 0;
+  await setState({
+    heroSmsActiveActivations: normalizedList,
+    heroSmsActiveActivationsFetchedAt: normalizedFetchedAt,
+  });
+  broadcastDataUpdate({
+    heroSmsActiveActivations: normalizedList,
+    heroSmsActiveActivationsFetchedAt: normalizedFetchedAt,
+  });
+  return normalizedList;
+}
+
 function getHeroSmsFailedActivations(state = {}) {
   return normalizeHeroSmsFailedActivationList(state.heroSmsFailedActivations);
 }
@@ -911,6 +1116,48 @@ async function upsertHeroSmsFailedActivationState(entry) {
     currentList.unshift(normalizedEntry);
   }
   return setHeroSmsFailedActivationsState(currentList);
+}
+
+function getHeroSmsStandbyActivations(state = {}) {
+  return normalizeHeroSmsStandbyActivationList(state.heroSmsStandbyActivations);
+}
+
+async function setHeroSmsStandbyActivationsState(list = []) {
+  const normalizedList = normalizeHeroSmsStandbyActivationList(list);
+  await setState({ heroSmsStandbyActivations: normalizedList });
+  broadcastDataUpdate({ heroSmsStandbyActivations: normalizedList });
+  return normalizedList;
+}
+
+async function upsertHeroSmsStandbyActivationState(entry) {
+  const normalizedEntry = normalizeHeroSmsStandbyActivation(entry);
+  if (!normalizedEntry) {
+    return getHeroSmsStandbyActivations(await getState());
+  }
+
+  const state = await getState();
+  const currentList = getHeroSmsStandbyActivations(state);
+  const existingIndex = currentList.findIndex((item) => item.activationId === normalizedEntry.activationId);
+  if (existingIndex >= 0) {
+    currentList[existingIndex] = {
+      ...currentList[existingIndex],
+      ...normalizedEntry,
+    };
+  } else {
+    currentList.unshift(normalizedEntry);
+  }
+  return setHeroSmsStandbyActivationsState(currentList);
+}
+
+async function removeHeroSmsStandbyActivationState(activationId) {
+  const normalizedId = Number(activationId);
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    return getHeroSmsStandbyActivations(await getState());
+  }
+
+  const state = await getState();
+  const nextList = getHeroSmsStandbyActivations(state).filter((item) => item.activationId !== normalizedId);
+  return setHeroSmsStandbyActivationsState(nextList);
 }
 
 async function mergeHeroSmsCurrentActivationState(patch = {}) {
@@ -949,8 +1196,18 @@ function ensureHeroSmsConfig(config) {
   return config;
 }
 
+function ensureHeroSmsApiConfig(config) {
+  if (!config.baseUrl) {
+    throw new Error('HeroSMS API 地址为空或格式无效。');
+  }
+  if (!config.apiKey) {
+    throw new Error('HeroSMS API Key 为空。');
+  }
+  return config;
+}
+
 async function requestHeroSmsText(config, action, params = {}) {
-  ensureHeroSmsConfig(config);
+  ensureHeroSmsApiConfig(config);
   const url = new URL(config.baseUrl);
   url.searchParams.set('action', action);
   url.searchParams.set('api_key', config.apiKey);
@@ -1099,11 +1356,49 @@ function parseHeroSmsStatusResponse(text = '') {
   };
 }
 
+function parseHeroSmsActiveActivationsResponse(payload) {
+  if (typeof payload === 'string') {
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${payload}`);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${JSON.stringify(payload)}`);
+  }
+
+  const status = String(payload.status || payload.result || '').trim().toLowerCase();
+  if (status && status !== 'success' && status !== 'ok') {
+    const errorText = extractHeroSmsErrorText(payload) || JSON.stringify(payload);
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${errorText}`);
+  }
+
+  const activeContainer = payload.activeActivations && typeof payload.activeActivations === 'object'
+    ? payload.activeActivations
+    : {};
+  const rowPayload = [];
+  if (Array.isArray(activeContainer.rows)) {
+    rowPayload.push(...activeContainer.rows);
+  }
+  if (Array.isArray(activeContainer.row)) {
+    rowPayload.push(...activeContainer.row);
+  } else if (activeContainer.row && typeof activeContainer.row === 'object') {
+    rowPayload.push(activeContainer.row);
+  }
+  const combined = [
+    ...(Array.isArray(payload.data) ? payload.data : []),
+    ...rowPayload,
+  ];
+
+  return normalizeHeroSmsActiveActivationList(combined);
+}
+
 function isHeroSmsDeliveredStatus(status = '') {
   const normalized = String(status || '').trim().toUpperCase();
   return normalized === 'STATUS_OK'
     || normalized === 'STATUS_WAIT_RETRY'
     || normalized === 'STATUS_WAIT_RESEND';
+}
+
+function isHeroSmsActivationCanceledStatus(status = '') {
+  return String(status || '').trim().toUpperCase() === 'STATUS_CANCEL';
 }
 
 function extractHeroSmsDeliveredCode(status) {
@@ -1124,6 +1419,7 @@ function extractHeroSmsDeliveredCode(status) {
 }
 
 async function heroSmsGetNumber(config, options = {}) {
+  ensureHeroSmsConfig(config);
   const payload = await requestHeroSmsPayload(config, 'getNumberV2', {
     service: config.service,
     country: config.country,
@@ -1134,6 +1430,12 @@ async function heroSmsGetNumber(config, options = {}) {
     phoneException: options.phoneException,
   });
   return parseHeroSmsNumberV2Response(payload);
+}
+
+async function heroSmsGetActiveActivations(config) {
+  ensureHeroSmsApiConfig(config);
+  const payload = await requestHeroSmsPayload(config, 'getActiveActivations', {});
+  return parseHeroSmsActiveActivationsResponse(payload);
 }
 
 async function heroSmsGetStatus(config, activationId) {
@@ -1153,6 +1455,106 @@ async function heroSmsCancelActivation(config, activationId) {
   return requestHeroSmsText(config, 'cancelActivation', { id: activationId });
 }
 
+function validateHeroSmsSetStatusResponse(statusCode, responseText = '') {
+  const normalizedStatusCode = Number(statusCode);
+  const response = String(responseText || '').trim();
+  const successPattern = normalizedStatusCode === 1
+    ? /^ACCESS_READY\b/i
+    : normalizedStatusCode === 3
+      ? /^ACCESS_RETRY_GET\b/i
+      : normalizedStatusCode === 6
+        ? /^ACCESS_ACTIVATION\b/i
+        : normalizedStatusCode === 8
+          ? /^ACCESS_CANCEL\b/i
+          : null;
+
+  if (successPattern && successPattern.test(response)) {
+    return response;
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(response);
+  } catch {
+    payload = null;
+  }
+
+  const errorText = extractHeroSmsErrorText(payload || response) || response || `status=${normalizedStatusCode}`;
+  throw new Error(`HeroSMS setStatus(${normalizedStatusCode}) 返回异常：${errorText}`);
+}
+
+async function heroSmsSetActivationReady(config, activationId) {
+  const response = await heroSmsSetStatus(config, activationId, 1);
+  return validateHeroSmsSetStatusResponse(1, response);
+}
+
+async function heroSmsRequestNextSms(config, activationId) {
+  const response = await heroSmsSetStatus(config, activationId, 3);
+  return validateHeroSmsSetStatusResponse(3, response);
+}
+
+async function heroSmsReleaseActivation(config, activationId, mode = 'cancel') {
+  const normalizedMode = String(mode || '').trim().toLowerCase() === 'complete' ? 'complete' : 'cancel';
+  const statusCode = normalizedMode === 'complete' ? 6 : 8;
+
+  try {
+    const response = await heroSmsSetStatus(config, activationId, statusCode);
+    return validateHeroSmsSetStatusResponse(statusCode, response);
+  } catch (err) {
+    if (normalizedMode === 'complete') {
+      return heroSmsFinishActivation(config, activationId);
+    }
+
+    try {
+      return await heroSmsCancelActivation(config, activationId);
+    } catch {
+      throw err;
+    }
+  }
+}
+
+async function attemptHeroSmsActivationRelease(activation, options = {}) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) {
+    return {
+      ok: false,
+      released: false,
+      mode: 'cancel',
+      releaseResponse: '',
+      error: new Error('缺少可释放的 HeroSMS 激活记录。'),
+    };
+  }
+
+  const state = options.state && typeof options.state === 'object'
+    ? options.state
+    : await getState();
+  const config = getHeroSmsConfig(state);
+  const releaseMode = options.preferComplete || normalizedActivation.useCount >= HERO_SMS_NUMBER_MAX_USES
+    ? 'complete'
+    : 'cancel';
+
+  try {
+    const releaseResponse = await heroSmsReleaseActivation(config, normalizedActivation.activationId, releaseMode);
+    return {
+      ok: true,
+      released: true,
+      mode: releaseMode,
+      releaseResponse,
+      activation: normalizedActivation,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      released: false,
+      mode: releaseMode,
+      releaseResponse: '',
+      activation: normalizedActivation,
+      error,
+    };
+  }
+}
+
 function isHeroSmsActivationReusable(state, activation) {
   const normalizedActivation = normalizeHeroSmsActivation(activation);
   if (!normalizedActivation) return false;
@@ -1161,7 +1563,159 @@ function isHeroSmsActivationReusable(state, activation) {
     && normalizedActivation.country === config.country
     && normalizedActivation.useCount < HERO_SMS_NUMBER_MAX_USES
     && getHeroSmsActivationRemainingMs(normalizedActivation) > 0
+    && !isHeroSmsActivationCanceledStatus(normalizedActivation.lastStatus)
     && !normalizedActivation.releasedAt;
+}
+
+function isHeroSmsStandbyActivationReusable(state, activation, now = Date.now()) {
+  const normalizedActivation = normalizeHeroSmsStandbyActivation(activation);
+  if (!normalizedActivation) return false;
+  const config = getHeroSmsConfig(state);
+  return normalizedActivation.service === config.service
+    && normalizedActivation.country === config.country
+    && normalizedActivation.useCount < HERO_SMS_NUMBER_MAX_USES
+    && getHeroSmsActivationRemainingMs(normalizedActivation, now) > 0
+    && normalizedActivation.retryAt <= now
+    && !isHeroSmsActivationCanceledStatus(normalizedActivation.lastStatus)
+    && !normalizedActivation.releasedAt;
+}
+
+async function cleanupExpiredHeroSmsStandbyActivations(state) {
+  const currentState = state || await getState();
+  const now = Date.now();
+  const standbyList = getHeroSmsStandbyActivations(currentState);
+  const nextList = [];
+  let changed = false;
+
+  for (const item of standbyList) {
+    const shouldRelease = getHeroSmsActivationRemainingMs(item, now) <= 0 || item.useCount >= HERO_SMS_NUMBER_MAX_USES;
+    if (!shouldRelease) {
+      nextList.push(item);
+      continue;
+    }
+
+    changed = true;
+    const releaseResult = await attemptHeroSmsActivationRelease(item, {
+      state: currentState,
+      preferComplete: item.useCount >= HERO_SMS_NUMBER_MAX_USES,
+    });
+    if (releaseResult.released) {
+      await addLog(
+        `HeroSMS：备用列表号码 ${item.phoneNumber} 已因${item.useCount >= HERO_SMS_NUMBER_MAX_USES ? '达到 Max 上限' : '有效期结束'}自动${releaseResult.mode === 'complete' ? '完成' : '释放'}。`,
+        'warn'
+      );
+      continue;
+    }
+
+    nextList.push(normalizeHeroSmsStandbyActivation({
+      ...item,
+      status: 'release_failed',
+      errorText: String(releaseResult.error?.message || item.errorText || '').trim(),
+    }));
+    await addLog(`HeroSMS：备用列表号码 ${item.phoneNumber} 自动释放失败，将保留记录稍后重试：${releaseResult.error?.message || '未知错误'}`, 'warn');
+  }
+
+  if (!changed) {
+    return standbyList;
+  }
+  await setHeroSmsStandbyActivationsState(nextList);
+  return nextList;
+}
+
+async function takeReusableHeroSmsStandbyActivation(state) {
+  const currentState = state || await getState();
+  const standbyList = await cleanupExpiredHeroSmsStandbyActivations(currentState);
+  const now = Date.now();
+  const candidate = standbyList
+    .filter((item) => isHeroSmsStandbyActivationReusable(currentState, item, now))
+    .sort((left, right) => (left.retryAt || 0) - (right.retryAt || 0))[0];
+  if (!candidate) {
+    return null;
+  }
+
+  await removeHeroSmsStandbyActivationState(candidate.activationId);
+  const activation = await setHeroSmsCurrentActivationState({
+    ...candidate,
+    lastSelectedAt: now,
+  });
+  await setHeroSmsRuntimeStatusState(`已从备用列表恢复号码 ${activation.phoneNumber}`);
+  await addLog(`HeroSMS：已从备用列表恢复手机号 ${activation.phoneNumber}（ID ${activation.activationId}）。`, 'warn');
+  return activation;
+}
+
+async function syncHeroSmsActiveActivations(state, options = {}) {
+  const currentState = state || await getState();
+  const config = ensureHeroSmsApiConfig({
+    baseUrl: normalizeHeroSmsBaseUrl(currentState.heroSmsBaseUrl),
+    apiKey: String(currentState.heroSmsApiKey || '').trim(),
+  });
+  const activeList = await heroSmsGetActiveActivations(config);
+  return setHeroSmsActiveActivationsState(activeList, options.fetchedAt || Date.now());
+}
+
+function pickReusableHeroSmsRemoteActiveActivation(state = {}, activeList = [], options = {}) {
+  const config = getHeroSmsConfig(state);
+  const failedIds = new Set(getHeroSmsFailedActivations(state).map((item) => item.activationId));
+  const standbyIds = new Set(getHeroSmsStandbyActivations(state).map((item) => item.activationId));
+  const explicitExcludedIds = new Set(
+    (Array.isArray(options.excludeActivationIds) ? options.excludeActivationIds : [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item > 0)
+  );
+  const candidates = normalizeHeroSmsActiveActivationList(activeList).filter((item) => {
+    if (!item.phoneNumber) return false;
+    if (failedIds.has(item.activationId) || standbyIds.has(item.activationId) || explicitExcludedIds.has(item.activationId)) {
+      return false;
+    }
+    if (item.service && item.service !== config.service) {
+      return false;
+    }
+    if (item.country && item.country !== config.country) {
+      return false;
+    }
+    return !isHeroSmsActivationCanceledStatus(item.status);
+  });
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const strictMatches = candidates.filter((item) => item.service === config.service && item.country === config.country);
+  if (strictMatches.length > 0) {
+    return strictMatches.sort((left, right) => {
+      const leftScore = left.acquiredAt || left.activationId || 0;
+      const rightScore = right.acquiredAt || right.activationId || 0;
+      return rightScore - leftScore;
+    })[0];
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+async function takeReusableHeroSmsRemoteActiveActivation(state, options = {}) {
+  const currentState = state || await getState();
+  const config = getHeroSmsConfig(currentState);
+  const fetchedAt = options.fetchedAt || Date.now();
+  const activeList = Array.isArray(options.activeList)
+    ? await setHeroSmsActiveActivationsState(options.activeList, fetchedAt)
+    : await syncHeroSmsActiveActivations(currentState, { fetchedAt });
+  const candidate = pickReusableHeroSmsRemoteActiveActivation(currentState, activeList, options);
+  if (!candidate) {
+    return null;
+  }
+
+  const activation = await setHeroSmsCurrentActivationState({
+    activationId: candidate.activationId,
+    phoneNumber: candidate.phoneNumber,
+    service: candidate.service || config.service,
+    country: candidate.country || config.country,
+    acquiredAt: candidate.acquiredAt || Date.now(),
+    expiresAt: candidate.expiresAt || ((candidate.acquiredAt || Date.now()) + HERO_SMS_ACTIVATION_TTL_MS),
+    lastStatus: candidate.status,
+  });
+  await setHeroSmsRuntimeStatusState(`已从 HeroSMS 活跃列表恢复号码 ${activation.phoneNumber}`);
+  await addLog(`HeroSMS：已从活跃号码列表恢复手机号 ${activation.phoneNumber}（ID ${activation.activationId}）。`, 'warn');
+  return activation;
 }
 
 async function finalizeHeroSmsActivation(stateOrActivation, options = {}) {
@@ -1181,21 +1735,31 @@ async function finalizeHeroSmsActivation(stateOrActivation, options = {}) {
     return { ok: true, released: false };
   }
 
-  const config = getHeroSmsConfig(state);
-  let releaseResponse = '';
-  let releaseMode = preferComplete || activation.useCount >= HERO_SMS_NUMBER_MAX_USES ? 'complete' : 'cancel';
-  try {
-    releaseResponse = releaseMode === 'complete'
-      ? await heroSmsFinishActivation(config, activation.activationId)
-      : await heroSmsCancelActivation(config, activation.activationId);
-  } catch (err) {
+  const releaseResult = await attemptHeroSmsActivationRelease(activation, {
+    state,
+    preferComplete,
+  });
+  if (!releaseResult.released) {
     if (!silent) {
-      await addLog(`HeroSMS：释放号码 ${activation.phoneNumber} 失败：${err.message}`, 'warn');
+      await addLog(`HeroSMS：释放号码 ${activation.phoneNumber} 失败：${releaseResult.error?.message || '未知错误'}`, 'warn');
     }
+    return {
+      ok: false,
+      released: false,
+      mode: releaseResult.mode,
+      releaseResponse: '',
+      error: releaseResult.error?.message || 'release_failed',
+    };
   }
+  const releaseResponse = releaseResult.releaseResponse;
+  const releaseMode = releaseResult.mode;
 
-  await setHeroSmsCurrentActivationState(null);
-  await setHeroSmsLastCodeState('');
+  const latestState = await getState();
+  const currentActivation = getCurrentHeroSmsActivation(latestState);
+  if (currentActivation && currentActivation.activationId === activation.activationId) {
+    await setHeroSmsCurrentActivationState(null);
+    await setHeroSmsLastCodeState('');
+  }
   await setHeroSmsRuntimeStatusState(
     activation.phoneNumber
       ? `号码 ${activation.phoneNumber} 已${releaseMode === 'complete' ? '完成' : '释放'}`
@@ -1207,12 +1771,21 @@ async function finalizeHeroSmsActivation(stateOrActivation, options = {}) {
       'ok'
     );
   }
+  try {
+    await syncHeroSmsActiveActivations({
+      ...state,
+      currentHeroSmsActivation: null,
+    }, { fetchedAt: Date.now() });
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to sync HeroSMS active activations after release:', err?.message || err);
+  }
 
   return {
     ok: true,
     released: true,
     mode: releaseMode,
     releaseResponse,
+    error: '',
   };
 }
 
@@ -1233,6 +1806,22 @@ async function ensureHeroSmsActivationForFlow(state, options = {}) {
     });
   }
 
+  const standbyActivation = await takeReusableHeroSmsStandbyActivation(currentState);
+  if (standbyActivation) {
+    return standbyActivation;
+  }
+
+  try {
+    const remoteActivation = await takeReusableHeroSmsRemoteActiveActivation(currentState, {
+      excludeActivationIds: currentActivation ? [currentActivation.activationId] : [],
+    });
+    if (remoteActivation) {
+      return remoteActivation;
+    }
+  } catch (err) {
+    await addLog(`HeroSMS：读取活跃号码列表失败，将继续申请新号码：${err.message}`, 'warn');
+  }
+
   const acquired = await heroSmsGetNumber(config, options);
   const activation = await setHeroSmsCurrentActivationState({
     activationId: acquired.activationId,
@@ -1247,7 +1836,48 @@ async function ensureHeroSmsActivationForFlow(state, options = {}) {
   await setHeroSmsLastCodeState('');
   await setHeroSmsRuntimeStatusState(`已获取号码 ${activation.phoneNumber}`);
   await addLog(`HeroSMS：已获取手机号 ${activation.phoneNumber}（ID ${activation.activationId}）`, 'ok');
+  try {
+    await syncHeroSmsActiveActivations({
+      ...currentState,
+      currentHeroSmsActivation: activation,
+    }, { fetchedAt: Date.now() });
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to sync HeroSMS active activations after acquire:', err?.message || err);
+  }
   return activation;
+}
+
+async function ensureHeroSmsActivationReadyForSubmission(state, options = {}) {
+  const maxAttempts = Math.max(1, Math.floor(Number(options.maxAttempts) || HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT));
+  let currentState = state || await getState();
+  let lastStatus = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const activation = await ensureHeroSmsActivationForFlow(currentState, options);
+    const config = ensureHeroSmsConfig(getHeroSmsConfig(currentState));
+    lastStatus = await heroSmsGetStatus(config, activation.activationId);
+    const updatedActivation = await mergeHeroSmsCurrentActivationState({
+      lastStatus: lastStatus.status,
+      lastStatusAt: Date.now(),
+    }) || activation;
+
+    if (!isHeroSmsActivationCanceledStatus(lastStatus.status)) {
+      return updatedActivation;
+    }
+
+    await addLog(
+      `HeroSMS：号码 ${activation.phoneNumber}（ID ${activation.activationId}）在填号前状态为 ${lastStatus.status}，正在重新申请新号码（${attempt}/${maxAttempts}）...`,
+      'warn'
+    );
+    await setHeroSmsCurrentActivationState(null);
+    await setHeroSmsLastCodeState('');
+    await setHeroSmsRuntimeStatusState('当前号码已失效，正在重新获取 HeroSMS 号码...');
+    currentState = await getState();
+  }
+
+  throw new Error(
+    `HeroSMS：连续 ${maxAttempts} 次在填号前检测到号码已失效，未能获取可用手机号。${lastStatus?.raw ? ` 最后一次状态：${lastStatus.raw}` : ''}`
+  );
 }
 
 async function requestHeroSmsResendForCurrentActivation(options = {}) {
@@ -1258,7 +1888,7 @@ async function requestHeroSmsResendForCurrentActivation(options = {}) {
     throw new Error('当前没有可重发验证码的 HeroSMS 号码。');
   }
 
-  const response = await heroSmsSetStatus(config, activation.activationId, 3);
+  const response = await heroSmsRequestNextSms(config, activation.activationId);
   const nextActivation = await mergeHeroSmsCurrentActivationState({
     resendCount: activation.resendCount + 1,
     lastStatus: response,
@@ -1306,7 +1936,48 @@ async function moveHeroSmsActivationToFailedList(activation, reason, errorText =
   }
   await setHeroSmsLastCodeState('');
   await setHeroSmsRuntimeStatusState(`号码 ${normalizedActivation.phoneNumber} 已移入失败列表，等待 2 分钟后清理`);
+  try {
+    await syncHeroSmsActiveActivations(await getState(), { fetchedAt: Date.now() });
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to sync HeroSMS active activations after moving to failed list:', err?.message || err);
+  }
   return failedEntry;
+}
+
+async function moveHeroSmsActivationToStandbyList(activation, reason, errorText = '') {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) {
+    return null;
+  }
+
+  const remainingMs = getHeroSmsActivationRemainingMs(normalizedActivation);
+  if (remainingMs <= HERO_SMS_STANDBY_RETRY_DELAY_MS) {
+    return null;
+  }
+
+  const standbyEntry = normalizeHeroSmsStandbyActivation({
+    ...normalizedActivation,
+    reason,
+    errorText,
+    standbyAt: Date.now(),
+    retryAt: Date.now() + HERO_SMS_STANDBY_RETRY_DELAY_MS,
+    status: 'waiting_retry',
+  });
+  await upsertHeroSmsStandbyActivationState(standbyEntry);
+
+  const latestState = await getState();
+  const currentActivation = getCurrentHeroSmsActivation(latestState);
+  if (currentActivation && currentActivation.activationId === normalizedActivation.activationId) {
+    await setHeroSmsCurrentActivationState(null);
+  }
+  await setHeroSmsLastCodeState('');
+  await setHeroSmsRuntimeStatusState(`号码 ${normalizedActivation.phoneNumber} 已移入备用列表，5 分钟后可再次尝试`);
+  try {
+    await syncHeroSmsActiveActivations(await getState(), { fetchedAt: Date.now() });
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to sync HeroSMS active activations after moving to standby list:', err?.message || err);
+  }
+  return standbyEntry;
 }
 
 async function cleanupHeroSmsFailedActivation(activationId) {
@@ -1332,18 +2003,19 @@ async function cleanupHeroSmsFailedActivation(activationId) {
   };
 
   try {
-    if (target.useCount > 0) {
-      const finishResponse = await heroSmsFinishActivation(config, target.activationId);
+    const shouldComplete = target.reason === 'phone_max_usage_exceeded' || target.useCount >= HERO_SMS_NUMBER_MAX_USES;
+    if (shouldComplete) {
+      const finishResponse = await heroSmsReleaseActivation(config, target.activationId, 'complete');
       nextPatch = {
         ...nextPatch,
         status: 'completed',
         cleanupResponse: finishResponse,
         cleanupCompletedAt: Date.now(),
       };
-      await addLog(`HeroSMS：失败列表号码 ${target.phoneNumber} 已按“完成激活”清理（已使用过）。`, 'ok');
+      await addLog(`HeroSMS：失败列表号码 ${target.phoneNumber} 已按“完成激活”清理。`, 'ok');
     } else {
       try {
-        const cancelResponse = await heroSmsCancelActivation(config, target.activationId);
+        const cancelResponse = await heroSmsReleaseActivation(config, target.activationId, 'cancel');
         nextPatch = {
           ...nextPatch,
           status: 'cancelled',
@@ -1352,7 +2024,7 @@ async function cleanupHeroSmsFailedActivation(activationId) {
         };
         await addLog(`HeroSMS：失败列表号码 ${target.phoneNumber} 已成功取消。`, 'ok');
       } catch (cancelErr) {
-        const finishResponse = await heroSmsFinishActivation(config, target.activationId);
+        const finishResponse = await heroSmsReleaseActivation(config, target.activationId, 'complete');
         nextPatch = {
           ...nextPatch,
           status: 'completed',
@@ -1410,7 +2082,7 @@ async function waitForHeroSmsCode(state, activation, options = {}) {
   let nextResendAt = start + resendAfterMs;
 
   if (options.markReady !== false) {
-    const readyResponse = await heroSmsSetStatus(config, currentActivation.activationId, 1);
+    const readyResponse = await heroSmsSetActivationReady(config, currentActivation.activationId);
     currentActivation = await mergeHeroSmsCurrentActivationState({
       lastStatus: readyResponse,
       lastStatusAt: Date.now(),
@@ -1487,7 +2159,10 @@ async function waitForHeroSmsCode(state, activation, options = {}) {
     await sleepWithStop(pollIntervalMs);
   }
 
-  throw new Error('HeroSMS 等待短信验证码超时。');
+  const timeoutError = new Error('HeroSMS 等待短信验证码超时。');
+  timeoutError.code = 'hero_sms_wait_code_timeout';
+  timeoutError.errorText = timeoutError.message;
+  throw timeoutError;
 }
 
 function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {}, config = getCloudflareTempEmailConfig(state)) {
@@ -2207,6 +2882,57 @@ async function syncHotmailAccounts(accounts) {
   await setState({ hotmailAccounts: normalized });
   broadcastDataUpdate({ hotmailAccounts: normalized });
   return normalized;
+}
+
+function normalizeHeroSmsStandbyActivationList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => normalizeHeroSmsStandbyActivation(item))
+    .filter(Boolean)
+    .sort((left, right) => (right.standbyAt || 0) - (left.standbyAt || 0));
+}
+
+function normalizeHeroSmsActiveActivationList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = value
+    .map((item) => normalizeHeroSmsActiveActivation(item))
+    .filter(Boolean)
+    .reduce((map, item) => {
+      const existing = map.get(item.activationId);
+      if (!existing) {
+        map.set(item.activationId, item);
+        return map;
+      }
+
+      map.set(item.activationId, {
+        ...existing,
+        ...item,
+        phoneNumber: item.phoneNumber || existing.phoneNumber,
+        service: item.service || existing.service,
+        country: item.country || existing.country,
+        status: item.status || existing.status,
+        acquiredAt: item.acquiredAt || existing.acquiredAt,
+        expiresAt: item.expiresAt || existing.expiresAt,
+        smsCode: item.smsCode || existing.smsCode,
+        smsText: item.smsText || existing.smsText,
+        cost: item.cost || existing.cost,
+        raw: item.raw || existing.raw,
+      });
+      return map;
+    }, new Map());
+
+  return Array.from(normalized.values())
+    .sort((left, right) => {
+      const leftTime = left.acquiredAt || left.activationId || 0;
+      const rightTime = right.acquiredAt || right.activationId || 0;
+      return rightTime - leftTime;
+    });
 }
 
 async function upsertHotmailAccount(input) {
@@ -3761,6 +4487,14 @@ function isPhoneSmsUnavailableErrorText(text = '') {
 }
 
 function getStep8FreshNumberFailureReason(error) {
+  if (error?.code === 'hero_sms_wait_code_timeout') {
+    return {
+      code: 'hero_sms_wait_code_timeout',
+      label: '等待 HeroSMS 短信超时',
+      recovery: 'history_back',
+    };
+  }
+
   const text = String(error?.errorText || error?.message || error || '').trim();
   if (!text) {
     return null;
@@ -3795,6 +4529,11 @@ function getStep8FreshNumberFailureReason(error) {
 
 function shouldRetryStep8WithFreshHeroSmsNumber(error) {
   return Boolean(getStep8FreshNumberFailureReason(error));
+}
+
+function shouldTriggerStep8PageResend(reason = '', attempt = 0) {
+  return String(reason || '').trim().toLowerCase() === 'timeout'
+    && Number(attempt) === 1;
 }
 
 async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload = {}) {
@@ -6085,6 +6824,16 @@ async function handleMessage(message, sender) {
         releaseReason: String(message.payload?.releaseReason || '').trim(),
         silent: false,
       });
+    }
+
+    case 'HERO_SMS_REFRESH_ACTIVE_ACTIVATIONS': {
+      const state = await getState();
+      const activations = await syncHeroSmsActiveActivations(state, { fetchedAt: Date.now() });
+      return {
+        ok: true,
+        activations,
+        fetchedAt: Date.now(),
+      };
     }
 
     case 'EXPORT_SETTINGS': {
@@ -9439,11 +10188,11 @@ async function getPhoneVerificationPageState(tabId, responseTimeoutMs = 1500) {
   }
 }
 
-async function submitPhoneNumberOnPage(tabId, phoneNumber) {
+async function submitPhoneNumberOnPage(tabId, phoneNumber, phoneCountry = null) {
   const result = await sendToContentScriptResilient('signup-page', {
     type: 'SUBMIT_PHONE_NUMBER',
     source: 'background',
-    payload: { phoneNumber },
+    payload: { phoneNumber, phoneCountry },
   }, {
     timeoutMs: 30000,
     retryDelayMs: 600,
@@ -9523,13 +10272,17 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
   for (let attempt = 1; attempt <= HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT; attempt += 1) {
     const state = await getState();
     await setHeroSmsRuntimeStatusState('正在获取 HeroSMS 号码...');
-    const activation = await ensureHeroSmsActivationForFlow(state);
+    const activation = await ensureHeroSmsActivationReadyForSubmission(state);
+    const phoneCountry = await getHeroSmsCountrySelection(activation.country || state.heroSmsCountry);
     await setState({ heroSmsPendingSuccessActivationId: 0 });
     await setHeroSmsRuntimeStatusState(`正在提交手机号 ${activation.phoneNumber}`);
-    await addLog(`步骤 8：检测到手机号页面，正在使用 HeroSMS 号码 ${activation.phoneNumber} 自动接码...`, 'warn');
+    await addLog(
+      `步骤 8：检测到手机号页面，正在使用 HeroSMS 号码 ${activation.phoneNumber}${phoneCountry?.name ? `（国家：${phoneCountry.name}）` : ''} 自动接码...`,
+      'warn'
+    );
 
     try {
-      const submitResult = await submitPhoneNumberOnPage(tabId, activation.phoneNumber);
+      const submitResult = await submitPhoneNumberOnPage(tabId, activation.phoneNumber, phoneCountry);
       if (submitResult?.errorText) {
         const submitError = new Error(`手机号提交失败：${submitResult.errorText}`);
         submitError.errorText = submitResult.errorText;
@@ -9553,29 +10306,31 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
         onResend: async ({ attempt: resendAttempt, reason }) => {
           const reasonText = reason === 'initial' ? '准备下一轮复用' : '等待新短信超时';
           await setHeroSmsRuntimeStatusState(`${reasonText}，第 ${resendAttempt} 次请求新短信`);
-          await addLog(`步骤 8：${reasonText}，正在第 ${resendAttempt} 次请求新的手机号验证码...`, 'warn');
+          await addLog(`步骤 8：${reasonText}，正在通过 HeroSMS API 请求新的手机号验证码（第 ${resendAttempt} 次）...`, 'warn');
 
-          try {
-            const resendPageResult = await triggerPhoneVerificationCodeResendOnPage(tabId);
-            if (resendPageResult?.resent) {
-              await addLog('步骤 8：已点击页面上的“重新发送短信”按钮。', 'warn');
-            } else {
-              await addLog('步骤 8：页面上的“重新发送短信”按钮暂不可用，本次仅请求 HeroSMS 侧重发。', 'warn');
-            }
-
-            if (resendPageResult?.errorText) {
-              const pageResendError = new Error(`页面重发短信被拒绝：${resendPageResult.errorText}`);
-              pageResendError.errorText = resendPageResult.errorText;
-              pageResendError.abortPolling = shouldRetryStep8WithFreshHeroSmsNumber(pageResendError);
-              if (pageResendError.abortPolling) {
-                throw pageResendError;
+          if (shouldTriggerStep8PageResend(reason, resendAttempt)) {
+            try {
+              const resendPageResult = await triggerPhoneVerificationCodeResendOnPage(tabId);
+              if (resendPageResult?.resent) {
+                await addLog('步骤 8：等待满 1 分钟后，已额外点击一次页面上的“重新发送短信”按钮。', 'warn');
+              } else {
+                await addLog('步骤 8：等待满 1 分钟后尝试点击页面重发按钮，但当前页面按钮暂不可用。', 'warn');
               }
+
+              if (resendPageResult?.errorText) {
+                const pageResendError = new Error(`页面重发短信被拒绝：${resendPageResult.errorText}`);
+                pageResendError.errorText = resendPageResult.errorText;
+                pageResendError.abortPolling = shouldRetryStep8WithFreshHeroSmsNumber(pageResendError);
+                if (pageResendError.abortPolling) {
+                  throw pageResendError;
+                }
+              }
+            } catch (err) {
+              if (err?.abortPolling) {
+                throw err;
+              }
+              await addLog(`步骤 8：等待 1 分钟后的页面重发尝试失败：${err.message}`, 'warn');
             }
-          } catch (err) {
-            if (err?.abortPolling) {
-              throw err;
-            }
-            await addLog(`步骤 8：页面重发短信失败：${err.message}`, 'warn');
           }
 
           await requestHeroSmsResendForCurrentActivation({ silent: false });
@@ -9613,17 +10368,91 @@ async function handleHeroSmsPhonePageDuringStep8(tabId) {
           'warn'
         );
         try {
-          await moveHeroSmsActivationToFailedList(
-            activation,
-            failureReason?.code || 'phone_verification_failed',
-            String(err?.errorText || err?.message || '').trim()
-          );
-          await addLog(
-            `步骤 8：已将号码 ${activation.phoneNumber}（ID ${activation.activationId}）记录到失败列表，2 分钟后自动清理。`,
-            'warn'
-          );
+          const failureCode = failureReason?.code || 'phone_verification_failed';
+          const failureText = String(err?.errorText || err?.message || '').trim();
+          if (failureCode === 'phone_max_usage_exceeded') {
+            const releaseResult = await finalizeHeroSmsActivation(activation, {
+              preferComplete: true,
+              releaseReason: failureCode,
+              silent: false,
+            });
+            if (releaseResult.released) {
+              await addLog(
+                `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）触发验证次数 Max 上限，已通过 HeroSMS setStatus=6 完成并释放。`,
+                'warn'
+              );
+            }
+          } else if (failureCode === 'phone_resend_rate_limited') {
+            const releaseResult = await finalizeHeroSmsActivation(activation, {
+              preferComplete: false,
+              releaseReason: failureCode,
+              silent: false,
+            });
+            if (releaseResult.released) {
+              await addLog(
+                `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）请求次数过多，已通过 HeroSMS setStatus=8 取消并释放，准备使用新号码。`,
+                'warn'
+              );
+            } else {
+              const standbyEntry = await moveHeroSmsActivationToStandbyList(
+                activation,
+                failureCode,
+                releaseResult.error || failureText || 'HeroSMS setStatus=8 释放失败'
+              );
+              if (standbyEntry) {
+                await addLog(
+                  `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）请求次数过多，释放失败后已移入备用列表；本轮将继续申请新号码，5 分钟后再尝试复用该号码，直到 Max 上限或过期自动释放。`,
+                  'warn'
+                );
+              } else {
+                await addLog(
+                  `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）请求次数过多，且释放失败，但已不足 5 分钟可等待，保留当前记录等待后续清理。`,
+                  'warn'
+                );
+              }
+            }
+          } else if (failureCode === 'hero_sms_wait_code_timeout') {
+            const releaseResult = await finalizeHeroSmsActivation(activation, {
+              preferComplete: false,
+              releaseReason: failureCode,
+              silent: false,
+            });
+            if (releaseResult.released) {
+              await addLog(
+                `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）等待验证码超时，已通过 HeroSMS setStatus=8 取消并释放，准备使用新号码。`,
+                'warn'
+              );
+            } else {
+              const standbyEntry = await moveHeroSmsActivationToStandbyList(
+                activation,
+                failureCode,
+                releaseResult.error || failureText || 'HeroSMS setStatus=8 释放失败'
+              );
+              if (standbyEntry) {
+                await addLog(
+                  `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）等待验证码超时，释放失败后已移入备用列表；本轮将继续申请新号码，5 分钟后再尝试复用该号码，直到 Max 上限或过期自动释放。`,
+                  'warn'
+                );
+              } else {
+                await addLog(
+                  `步骤 8：号码 ${activation.phoneNumber}（ID ${activation.activationId}）等待验证码超时，且释放失败，但已不足 5 分钟可等待，保留当前记录等待后续清理。`,
+                  'warn'
+                );
+              }
+            }
+          } else {
+            await moveHeroSmsActivationToFailedList(
+              activation,
+              failureCode,
+              failureText
+            );
+            await addLog(
+              `步骤 8：已将号码 ${activation.phoneNumber}（ID ${activation.activationId}）记录到失败列表，2 分钟后自动清理。`,
+              'warn'
+            );
+          }
         } catch (listErr) {
-          await addLog(`步骤 8：记录失败号码时出错：${listErr.message}`, 'warn');
+          await addLog(`步骤 8：处理失败号码时出错：${listErr.message}`, 'warn');
         }
 
         try {

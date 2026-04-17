@@ -97,6 +97,9 @@ const displayHeroSmsRemaining = document.getElementById('display-hero-sms-remain
 const displayHeroSmsUsage = document.getElementById('display-hero-sms-usage');
 const displayHeroSmsCode = document.getElementById('display-hero-sms-code');
 const displayHeroSmsStatus = document.getElementById('display-hero-sms-status');
+const btnHeroSmsRefreshActive = document.getElementById('btn-hero-sms-refresh-active');
+const displayHeroSmsActiveCount = document.getElementById('display-hero-sms-active-count');
+const heroSmsActiveList = document.getElementById('hero-sms-active-list');
 const displayHeroSmsFailedCount = document.getElementById('display-hero-sms-failed-count');
 const heroSmsFailedList = document.getElementById('hero-sms-failed-list');
 const btnHeroSmsResend = document.getElementById('btn-hero-sms-resend');
@@ -265,6 +268,7 @@ let configMenuOpen = false;
 let configActionInFlight = false;
 let currentReleaseSnapshot = null;
 let heroSmsActionInFlight = false;
+let heroSmsActiveRefreshInFlight = false;
 let heroSmsAutoReleaseInFlight = false;
 let heroSmsAutoReleaseKey = '';
 
@@ -980,6 +984,69 @@ function normalizeHeroSmsActivationState(value = null) {
   };
 }
 
+function normalizeHeroSmsActiveActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(
+    value.activationId
+    ?? value.activation_id
+    ?? value.id
+    ?? value.orderId
+    ?? value.order_id
+  );
+  if (!Number.isInteger(activationId) || activationId <= 0) {
+    return null;
+  }
+
+  const acquiredAt = Number(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? 0
+  ) || Date.parse(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? ''
+  ) || 0;
+  const expiresAt = Number(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? 0
+  ) || Date.parse(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? ''
+  ) || 0;
+
+  return {
+    activationId,
+    phoneNumber: String(value.phoneNumber ?? value.phone_number ?? value.number ?? value.phone ?? value.msisdn ?? '').trim(),
+    service: normalizeHeroSmsServiceValue(value.service ?? value.serviceCode ?? value.service_code),
+    country: normalizeHeroSmsCountryValue(value.country ?? value.countryCode ?? value.country_code ?? value.countryId ?? value.country_id),
+    status: String(value.status ?? value.state ?? value.activationStatus ?? '').trim(),
+    acquiredAt,
+    expiresAt,
+    smsCode: String(value.smsCode ?? value.code ?? '').trim(),
+    smsText: String(value.smsText ?? value.text ?? '').trim(),
+    cost: String(value.activationCost ?? value.cost ?? '').trim(),
+  };
+}
+
 function normalizeHeroSmsFailedActivationState(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -1020,6 +1087,21 @@ function getHeroSmsFailedActivationList(state = latestState) {
     .sort((left, right) => (right.failedAt || 0) - (left.failedAt || 0));
 }
 
+function getHeroSmsActiveActivationList(state = latestState) {
+  if (!Array.isArray(state?.heroSmsActiveActivations)) {
+    return [];
+  }
+
+  return state.heroSmsActiveActivations
+    .map((item) => normalizeHeroSmsActiveActivationState(item))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftTime = left.acquiredAt || left.activationId || 0;
+      const rightTime = right.acquiredAt || right.activationId || 0;
+      return rightTime - leftTime;
+    });
+}
+
 function getHeroSmsActivationRemainingMs(activation, now = Date.now()) {
   const normalized = normalizeHeroSmsActivationState(activation);
   if (!normalized) return 0;
@@ -1036,6 +1118,15 @@ function updateHeroSmsResendButtonState() {
   }
   btnHeroSmsResend.disabled = heroSmsActionInFlight || heroSmsAutoReleaseInFlight || !getCurrentHeroSmsActivation();
   btnHeroSmsResend.textContent = heroSmsActionInFlight ? '请求中' : '重新获取验证码';
+}
+
+function updateHeroSmsActiveRefreshButtonState() {
+  if (!btnHeroSmsRefreshActive) {
+    return;
+  }
+
+  btnHeroSmsRefreshActive.disabled = heroSmsActiveRefreshInFlight;
+  btnHeroSmsRefreshActive.textContent = heroSmsActiveRefreshInFlight ? '刷新中' : '刷新';
 }
 
 function maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs) {
@@ -1065,6 +1156,47 @@ function maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs) {
   });
 }
 
+async function refreshHeroSmsActiveActivations(options = {}) {
+  if (heroSmsActiveRefreshInFlight) {
+    return null;
+  }
+
+  heroSmsActiveRefreshInFlight = true;
+  updateHeroSmsActiveRefreshButtonState();
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'HERO_SMS_REFRESH_ACTIVE_ACTIVATIONS',
+      source: 'sidepanel',
+      payload: {},
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+
+    if (response?.activations !== undefined) {
+      latestState = {
+        ...latestState,
+        heroSmsActiveActivations: Array.isArray(response.activations) ? response.activations : [],
+        heroSmsActiveActivationsFetchedAt: Number(response.fetchedAt) || Date.now(),
+      };
+      renderHeroSmsPanel(latestState);
+    }
+
+    if (!options.silent) {
+      showToast(`已同步 ${Array.isArray(response?.activations) ? response.activations.length : 0} 个活跃号码。`, 'success', 1800);
+    }
+    return response;
+  } catch (err) {
+    if (!options.silent) {
+      showToast(`刷新活跃号码失败：${err.message}`, 'error');
+    }
+    throw err;
+  } finally {
+    heroSmsActiveRefreshInFlight = false;
+    updateHeroSmsActiveRefreshButtonState();
+  }
+}
+
 function formatHeroSmsFailedActivationStatus(item) {
   switch (item?.status) {
     case 'scheduled':
@@ -1078,6 +1210,65 @@ function formatHeroSmsFailedActivationStatus(item) {
     default:
       return item?.status || '未知';
   }
+}
+
+function formatHeroSmsActiveActivationStatus(item) {
+  const normalized = String(item?.status || '').trim();
+  if (!normalized) {
+    return 'ACTIVE';
+  }
+  if (normalized === '2') {
+    return '已收码';
+  }
+  if (normalized === '1') {
+    return '等待短信';
+  }
+  if (normalized === '3') {
+    return '已取消';
+  }
+  return normalized;
+}
+
+function renderHeroSmsActiveActivationList(state = latestState) {
+  if (!heroSmsActiveList) {
+    return;
+  }
+
+  const items = getHeroSmsActiveActivationList(state);
+  if (displayHeroSmsActiveCount) {
+    displayHeroSmsActiveCount.textContent = String(items.length);
+  }
+
+  if (!items.length) {
+    heroSmsActiveList.innerHTML = '<div class="hero-sms-failed-empty">暂无活跃号码记录。</div>';
+    return;
+  }
+
+  heroSmsActiveList.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'hero-sms-failed-item';
+    const remainingMs = item.expiresAt ? Math.max(0, item.expiresAt - Date.now()) : 0;
+    const remainingText = item.expiresAt
+      ? (remainingMs > 0 ? formatCountdown(remainingMs) : '即将到期')
+      : '未知';
+    const receivedText = item.acquiredAt ? formatScheduleTime(item.acquiredAt) : '未知';
+    const smsSummary = item.smsCode
+      ? `验证码 ${item.smsCode}${item.smsText ? ` · ${item.smsText}` : ''}`
+      : (item.smsText || '等待短信');
+
+    row.innerHTML = `
+      <div class="hero-sms-failed-meta">
+        <span class="hero-sms-failed-phone mono">${item.phoneNumber || '未知号码'}</span>
+        <span class="hero-sms-failed-status">${formatHeroSmsActiveActivationStatus(item)}</span>
+      </div>
+      <div class="hero-sms-failed-detail mono">ID ${item.activationId} · 剩余 ${remainingText}</div>
+      <div class="hero-sms-failed-detail">${item.service || 'unknown service'}${item.country ? ` · 国家 ${item.country}` : ''}${item.cost ? ` · 费用 ${item.cost}` : ''}</div>
+      <div class="hero-sms-failed-detail">${smsSummary}</div>
+      <div class="hero-sms-failed-detail mono">创建时间 ${receivedText}</div>
+    `;
+    heroSmsActiveList.appendChild(row);
+  });
 }
 
 function renderHeroSmsFailedActivationList(state = latestState) {
@@ -1147,7 +1338,9 @@ function renderHeroSmsPanel(state = latestState) {
   }
 
   maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs);
+  renderHeroSmsActiveActivationList(state);
   updateHeroSmsResendButtonState();
+  updateHeroSmsActiveRefreshButtonState();
   renderHeroSmsFailedActivationList(state);
 }
 
@@ -1919,6 +2112,10 @@ async function restoreState() {
       for (const entry of state.logs) {
         appendLog(entry);
       }
+    }
+
+    if (state?.heroSmsApiKey && normalizeHeroSmsBaseUrlValue(state?.heroSmsBaseUrl || '')) {
+      refreshHeroSmsActiveActivations({ silent: true }).catch(() => { });
     }
 
     updateStatusDisplay(latestState);
@@ -4895,6 +5092,10 @@ btnHeroSmsResend?.addEventListener('click', async () => {
     heroSmsActionInFlight = false;
     updateHeroSmsResendButtonState();
   }
+});
+
+btnHeroSmsRefreshActive?.addEventListener('click', async () => {
+  await refreshHeroSmsActiveActivations({ silent: false });
 });
 
 inputPassword.addEventListener('input', () => {

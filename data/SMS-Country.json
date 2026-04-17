@@ -1,0 +1,2052 @@
+[
+  {
+    "id": 0,
+    "rus": "Россия",
+    "eng": "Russia",
+    "chn": "俄罗斯",
+    "visible": 0,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 1,
+    "rus": "Украина",
+    "eng": "Ukraine",
+    "chn": "乌克兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 2,
+    "rus": "Казахстан",
+    "eng": "Kazakhstan",
+    "chn": "哈萨克斯坦",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 3,
+    "rus": "Китай",
+    "eng": "China",
+    "chn": "中国",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 4,
+    "rus": "Филиппины",
+    "eng": "Philippines",
+    "chn": "菲律宾",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 5,
+    "rus": "Мьянма",
+    "eng": "Myanmar",
+    "chn": "缅甸",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 6,
+    "rus": "Индонезия",
+    "eng": "Indonesia",
+    "chn": "印度尼西亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 7,
+    "rus": "Малайзия",
+    "eng": "Malaysia",
+    "chn": "马来西亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 8,
+    "rus": "Кения",
+    "eng": "Kenya",
+    "chn": "肯尼亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 9,
+    "rus": "Танзания",
+    "eng": "Tanzania",
+    "chn": "坦桑尼亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 10,
+    "rus": "Вьетнам",
+    "eng": "Vietnam",
+    "chn": "越南",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 11,
+    "rus": "Кыргызстан",
+    "eng": "Kyrgyzstan",
+    "chn": "吉尔吉斯斯坦",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 12,
+    "rus": "США (виртуальные)",
+    "eng": "USA (virtual)",
+    "chn": "美国（虚拟）",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 13,
+    "rus": "Израиль",
+    "eng": "Israel",
+    "chn": "以色列",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 14,
+    "rus": "Гонконг",
+    "eng": "Hong Kong",
+    "chn": "香港",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 15,
+    "rus": "Польша",
+    "eng": "Poland",
+    "chn": "波兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 16,
+    "rus": "Великобритания",
+    "eng": "United Kingdom",
+    "chn": "英格兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 17,
+    "rus": "Мадагаскар",
+    "eng": "Madagascar",
+    "chn": "马达加斯加",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 18,
+    "rus": "Дем. Конго",
+    "eng": "DR Congo",
+    "chn": "刚果",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 19,
+    "rus": "Нигерия",
+    "eng": "Nigeria",
+    "chn": "尼日利亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 20,
+    "rus": "Макао",
+    "eng": "Macao",
+    "chn": "澳门",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 21,
+    "rus": "Египет",
+    "eng": "Egypt",
+    "chn": "埃及",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 22,
+    "rus": "Индия",
+    "eng": "India",
+    "chn": "印度",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 23,
+    "rus": "Ирландия",
+    "eng": "Ireland",
+    "chn": "爱尔兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 24,
+    "rus": "Камбоджа",
+    "eng": "Cambodia",
+    "chn": "柬埔寨",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 25,
+    "rus": "Лаос",
+    "eng": "Laos",
+    "chn": "老挝",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 26,
+    "rus": "Гаити",
+    "eng": "Haiti",
+    "chn": "海地",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 27,
+    "rus": "Кот д'Ивуар",
+    "eng": "Ivory Coast",
+    "chn": "象牙海岸",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 28,
+    "rus": "Гамбия",
+    "eng": "Gambia",
+    "chn": "冈比亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 29,
+    "rus": "Сербия",
+    "eng": "Serbia",
+    "chn": "塞尔维亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 30,
+    "rus": "Йемен",
+    "eng": "Yemen",
+    "chn": "也门",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 31,
+    "rus": "ЮАР",
+    "eng": "South Africa",
+    "chn": "南非",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 32,
+    "rus": "Румыния",
+    "eng": "Romania",
+    "chn": "罗马尼亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 33,
+    "rus": "Колумбия",
+    "eng": "Colombia",
+    "chn": "哥伦比亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 34,
+    "rus": "Эстония",
+    "eng": "Estonia",
+    "chn": "爱沙尼亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 35,
+    "rus": "Азербайджан",
+    "eng": "Azerbaijan",
+    "chn": "阿塞拜疆",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 36,
+    "rus": "Канада",
+    "eng": "Canada",
+    "chn": "加拿大",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 37,
+    "rus": "Марокко",
+    "eng": "Morocco",
+    "chn": "摩洛哥",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 38,
+    "rus": "Гана",
+    "eng": "Ghana",
+    "chn": "加纳",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 39,
+    "rus": "Аргентина",
+    "eng": "Argentina",
+    "chn": "阿根廷",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 40,
+    "rus": "Узбекистан",
+    "eng": "Uzbekistan",
+    "chn": "乌兹别克斯坦",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 41,
+    "rus": "Камерун",
+    "eng": "Cameroon",
+    "chn": "喀麦隆",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 42,
+    "rus": "Чад",
+    "eng": "Chad",
+    "chn": "乍得",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 43,
+    "rus": "Германия",
+    "eng": "Germany",
+    "chn": "德国",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 44,
+    "rus": "Литва",
+    "eng": "Lithuania",
+    "chn": "立陶宛",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 45,
+    "rus": "Хорватия",
+    "eng": "Croatia",
+    "chn": "克罗地亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 46,
+    "rus": "Швеция",
+    "eng": "Sweden",
+    "chn": "瑞典",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 47,
+    "rus": "Ирак",
+    "eng": "Iraq",
+    "chn": "伊拉克",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 48,
+    "rus": "Нидерланды",
+    "eng": "Netherlands",
+    "chn": "荷兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 49,
+    "rus": "Латвия",
+    "eng": "Latvia",
+    "chn": "拉脱维亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 50,
+    "rus": "Австрия",
+    "eng": "Austria",
+    "chn": "奥地利",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 51,
+    "rus": "Беларусь",
+    "eng": "Belarus",
+    "chn": "白俄罗斯",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 52,
+    "rus": "Таиланд",
+    "eng": "Thailand",
+    "chn": "泰国",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 53,
+    "rus": "Сауд. Аравия",
+    "eng": "Saudi Arabia",
+    "chn": "沙特阿拉伯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 54,
+    "rus": "Мексика",
+    "eng": "Mexico",
+    "chn": "墨西哥",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 55,
+    "rus": "Тайвань",
+    "eng": "Taiwan",
+    "chn": "台湾",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 56,
+    "rus": "Испания",
+    "eng": "Spain",
+    "chn": "西班牙",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 57,
+    "rus": "Иран",
+    "eng": "Iran",
+    "chn": "伊朗",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 58,
+    "rus": "Алжир",
+    "eng": "Algeria",
+    "chn": "阿尔及利亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 59,
+    "rus": "Словения",
+    "eng": "Slovenia",
+    "chn": "斯洛文尼亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 60,
+    "rus": "Бангладеш",
+    "eng": "Bangladesh",
+    "chn": "孟加拉国",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 61,
+    "rus": "Сенегал",
+    "eng": "Senegal",
+    "chn": "塞内加尔",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 62,
+    "rus": "Турция",
+    "eng": "Turkey",
+    "chn": "土耳其",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 63,
+    "rus": "Чехия",
+    "eng": "Czech",
+    "chn": "捷克共和国",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 64,
+    "rus": "Шри-Ланка",
+    "eng": "Sri Lanka",
+    "chn": "斯里兰卡",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 65,
+    "rus": "Перу",
+    "eng": "Peru",
+    "chn": "秘鲁",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 66,
+    "rus": "Пакистан",
+    "eng": "Pakistan",
+    "chn": "巴基斯坦",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 67,
+    "rus": "Новая Зеландия",
+    "eng": "New Zealand",
+    "chn": "新西兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 68,
+    "rus": "Гвинея",
+    "eng": "Guinea",
+    "chn": "几内亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 69,
+    "rus": "Мали",
+    "eng": "Mali",
+    "chn": "马里",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 70,
+    "rus": "Венесуэла",
+    "eng": "Venezuela",
+    "chn": "委内瑞拉",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 71,
+    "rus": "Эфиопия",
+    "eng": "Ethiopia",
+    "chn": "埃塞俄比亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 72,
+    "rus": "Монголия",
+    "eng": "Mongolia",
+    "chn": "蒙古",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 73,
+    "rus": "Бразилия",
+    "eng": "Brazil",
+    "chn": "巴西",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 74,
+    "rus": "Афганистан",
+    "eng": "Afghanistan",
+    "chn": "阿富汗",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 75,
+    "rus": "Уганда",
+    "eng": "Uganda",
+    "chn": "乌干达",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 76,
+    "rus": "Ангола",
+    "eng": "Angola",
+    "chn": "安哥拉",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 77,
+    "rus": "Кипр",
+    "eng": "Cyprus",
+    "chn": "塞浦路斯",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 78,
+    "rus": "Франция",
+    "eng": "France",
+    "chn": "法國",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 79,
+    "rus": "Папуа-Новая Гвинея",
+    "eng": "Papua",
+    "chn": "巴布亞新幾內亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 80,
+    "rus": "Мозамбик",
+    "eng": "Mozambique",
+    "chn": "莫桑比克",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 81,
+    "rus": "Непал",
+    "eng": "Nepal",
+    "chn": "尼泊爾",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 82,
+    "rus": "Бельгия",
+    "eng": "Belgium",
+    "chn": "比利時",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 83,
+    "rus": "Болгария",
+    "eng": "Bulgaria",
+    "chn": "保加利亞",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 84,
+    "rus": "Венгрия",
+    "eng": "Hungary",
+    "chn": "匈牙利",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 85,
+    "rus": "Молдова",
+    "eng": "Moldova",
+    "chn": "摩爾多瓦",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 86,
+    "rus": "Италия",
+    "eng": "Italy",
+    "chn": "義大利",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 87,
+    "rus": "Парагвай",
+    "eng": "Paraguay",
+    "chn": "巴拉圭",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 88,
+    "rus": "Гондурас",
+    "eng": "Honduras",
+    "chn": "洪都拉斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 89,
+    "rus": "Тунис",
+    "eng": "Tunisia",
+    "chn": "突尼斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 90,
+    "rus": "Никарагуа",
+    "eng": "Nicaragua",
+    "chn": "尼加拉瓜",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 91,
+    "rus": "Тимор-Лесте",
+    "eng": "Timor-Leste",
+    "chn": "東帝汶",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 92,
+    "rus": "Боливия",
+    "eng": "Bolivia",
+    "chn": "玻利維亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 93,
+    "rus": "Коста Рика",
+    "eng": "Costa Rica",
+    "chn": "哥斯達黎加",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 94,
+    "rus": "Гватемала",
+    "eng": "Guatemala",
+    "chn": "危地馬拉",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 95,
+    "rus": "ОАЭ",
+    "eng": "UAE",
+    "chn": "阿拉伯聯合酋長國",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 96,
+    "rus": "Зимбабве",
+    "eng": "Zimbabwe",
+    "chn": "津巴布韋",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 97,
+    "rus": "Пуэрто-Рико",
+    "eng": "Puerto Rico",
+    "chn": "波多黎各",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 98,
+    "rus": "Судан",
+    "eng": "Sudan",
+    "chn": "蘇丹蘇丹",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 99,
+    "rus": "Того",
+    "eng": "Togo",
+    "chn": "多哥",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 100,
+    "rus": "Кувейт",
+    "eng": "Kuwait",
+    "chn": "科威特",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 101,
+    "rus": "Сальвадор",
+    "eng": "Salvador",
+    "chn": "薩爾瓦多",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 102,
+    "rus": "Ливия",
+    "eng": "Libya",
+    "chn": "利比亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 103,
+    "rus": "Ямайка",
+    "eng": "Jamaica",
+    "chn": "牙買加",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 104,
+    "rus": "Тринидад и Тобаго",
+    "eng": "Trinidad and Tobago",
+    "chn": "特立尼達和多巴哥",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 105,
+    "rus": "Эквадор",
+    "eng": "Ecuador",
+    "chn": "厄瓜多爾",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 106,
+    "rus": "Свазиленд",
+    "eng": "Swaziland",
+    "chn": "斯威士蘭",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 107,
+    "rus": "Оман",
+    "eng": "Oman",
+    "chn": "阿曼",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 108,
+    "rus": "Босния и Герцеговина",
+    "eng": "Bosnia",
+    "chn": "波斯尼亞和黑塞哥維那",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 109,
+    "rus": "Доминиканская Республика",
+    "eng": "Dominican Republic",
+    "chn": "多明尼加共和國",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 110,
+    "rus": "Сирия",
+    "eng": "Syria",
+    "chn": "敘利亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 111,
+    "rus": "Катар",
+    "eng": "Qatar",
+    "chn": "卡塔爾",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 112,
+    "rus": "Панама",
+    "eng": "Panama",
+    "chn": "巴拿馬",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 113,
+    "rus": "Куба",
+    "eng": "Cuba",
+    "chn": "古巴",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 114,
+    "rus": "Мавритания",
+    "eng": "Mauritania",
+    "chn": "毛里塔尼亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 115,
+    "rus": "Сьерра-Леоне",
+    "eng": "Sierra Leone",
+    "chn": "塞拉利昂",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 116,
+    "rus": "Иордания",
+    "eng": "Jordan",
+    "chn": "約旦",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 117,
+    "rus": "Португалия",
+    "eng": "Portugal",
+    "chn": "葡萄牙",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 118,
+    "rus": "Барбадос",
+    "eng": "Barbados",
+    "chn": "巴巴多斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 119,
+    "rus": "Бурунди",
+    "eng": "Burundi",
+    "chn": "布隆迪",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 120,
+    "rus": "Бенин",
+    "eng": "Benin",
+    "chn": "貝寧",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 121,
+    "rus": "Бруней",
+    "eng": "Brunei",
+    "chn": "文萊",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 122,
+    "rus": "Багамы",
+    "eng": "Bahamas",
+    "chn": "巴哈馬",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 123,
+    "rus": "Ботсвана",
+    "eng": "Botswana",
+    "chn": "博茨瓦納",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 124,
+    "rus": "Белиз",
+    "eng": "Belize",
+    "chn": "伯利茲",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 125,
+    "rus": "ЦАР",
+    "eng": "Central African Republic",
+    "chn": "中非共和國",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 126,
+    "rus": "Доминика",
+    "eng": "Dominica",
+    "chn": "多米尼加",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 127,
+    "rus": "Гренада",
+    "eng": "Grenada",
+    "chn": "格林納達",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 128,
+    "rus": "Грузия",
+    "eng": "Georgia",
+    "chn": "佐治亞州",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 129,
+    "rus": "Греция",
+    "eng": "Greece",
+    "chn": "希臘",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 130,
+    "rus": "Гвинея-Бисау",
+    "eng": "Guinea-Bissau",
+    "chn": "幾內亞比紹",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 131,
+    "rus": "Гайана",
+    "eng": "Guyana",
+    "chn": "圭亞那",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 132,
+    "rus": "Исландия",
+    "eng": "Iceland",
+    "chn": "冰島",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 133,
+    "rus": "Коморы",
+    "eng": "Comoros",
+    "chn": "科摩羅",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 134,
+    "rus": "Сент-Китс и Невис",
+    "eng": "Saint Kitts and Nevis",
+    "chn": "聖基茨和尼維斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 135,
+    "rus": "Либерия",
+    "eng": "Liberia",
+    "chn": "利比里亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 136,
+    "rus": "Лесото",
+    "eng": "Lesotho",
+    "chn": "萊索托",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 137,
+    "rus": "Малави",
+    "eng": "Malawi",
+    "chn": "馬拉維",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 138,
+    "rus": "Намибия",
+    "eng": "Namibia",
+    "chn": "納米比亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 139,
+    "rus": "Нигер",
+    "eng": "Niger",
+    "chn": "尼日爾",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 140,
+    "rus": "Руанда",
+    "eng": "Rwanda",
+    "chn": "盧旺達",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 141,
+    "rus": "Словакия",
+    "eng": "Slovakia",
+    "chn": "斯洛伐克",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 142,
+    "rus": "Суринам",
+    "eng": "Suriname",
+    "chn": "蘇里南",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 143,
+    "rus": "Таджикистан",
+    "eng": "Tajikistan",
+    "chn": "塔吉克斯坦",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 144,
+    "rus": "Монако",
+    "eng": "Monaco",
+    "chn": "摩納哥",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 145,
+    "rus": "Бахрейн",
+    "eng": "Bahrain",
+    "chn": "巴林",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 146,
+    "rus": "Реюньон",
+    "eng": "Reunion",
+    "chn": "團圓",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 147,
+    "rus": "Замбия",
+    "eng": "Zambia",
+    "chn": "贊比亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 148,
+    "rus": "Армения",
+    "eng": "Armenia",
+    "chn": "亞美尼亞",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 149,
+    "rus": "Сомали",
+    "eng": "Somalia",
+    "chn": "索馬里",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 150,
+    "rus": "Конго",
+    "eng": "Congo",
+    "chn": "剛果",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 151,
+    "rus": "Чили",
+    "eng": "Chile",
+    "chn": "智利",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 152,
+    "rus": "Буркина-Фасо",
+    "eng": "Burkina Faso",
+    "chn": "布基納法索",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 153,
+    "rus": "Ливан",
+    "eng": "Lebanon",
+    "chn": "黎巴嫩",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 154,
+    "rus": "Габон",
+    "eng": "Gabon",
+    "chn": "加蓬",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 155,
+    "rus": "Албания",
+    "eng": "Albania",
+    "chn": "阿爾巴尼亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 156,
+    "rus": "Уругвай",
+    "eng": "Uruguay",
+    "chn": "烏拉圭",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 157,
+    "rus": "Маврикий",
+    "eng": "Mauritius",
+    "chn": "毛里求斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 158,
+    "rus": "Бутан",
+    "eng": "Bhutan",
+    "chn": "丁烷",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 159,
+    "rus": "Мальдивы",
+    "eng": "Maldives",
+    "chn": "马尔代夫",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 160,
+    "rus": "Гваделупа",
+    "eng": "Guadeloupe",
+    "chn": "瓜德罗普岛",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 161,
+    "rus": "Туркменистан",
+    "eng": "Turkmenistan",
+    "chn": "土库曼斯坦",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 162,
+    "rus": "Французская Гвиана",
+    "eng": "French Guiana",
+    "chn": "法属圭亚那",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 163,
+    "rus": "Финляндия",
+    "eng": "Finland",
+    "chn": "芬兰",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 164,
+    "rus": "Сент-Люсия",
+    "eng": "Saint Lucia",
+    "chn": "圣卢西亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 165,
+    "rus": "Люксембург",
+    "eng": "Luxembourg",
+    "chn": "卢森堡",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 166,
+    "rus": "Сент-Винсент и Гренадин",
+    "eng": "Saint Vincent and the Grenadines",
+    "chn": "圣文森特和格林纳丁斯",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 167,
+    "rus": "Экваториальная Гвинея",
+    "eng": "Equatorial Guinea",
+    "chn": "赤道几内亚",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 168,
+    "rus": "Джибути",
+    "eng": "Djibouti",
+    "chn": "吉布地",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 169,
+    "rus": "Антигуа и Барбуда",
+    "eng": "Antigua and Barbuda",
+    "chn": "安提瓜和巴布达",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 170,
+    "rus": "Острова Кайман",
+    "eng": "Cayman Islands",
+    "chn": "开曼群岛",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 171,
+    "rus": "Черногория",
+    "eng": "Montenegro",
+    "chn": "黑山共和国",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 172,
+    "rus": "Дания",
+    "eng": "Denmark",
+    "chn": "丹麥",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 173,
+    "rus": "Швейцария",
+    "eng": "Switzerland",
+    "chn": "瑞士",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 174,
+    "rus": "Норвегия",
+    "eng": "Norway",
+    "chn": "挪威",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 175,
+    "rus": "Австралия",
+    "eng": "Australia",
+    "chn": "澳大利亞",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 176,
+    "rus": "Эритрея",
+    "eng": "Eritrea",
+    "chn": "厄立特里亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 177,
+    "rus": "Южный Судан",
+    "eng": "South Sudan",
+    "chn": "南蘇丹",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 178,
+    "rus": "Сан-Томе и Принсипи",
+    "eng": "Sao Tome and Principe",
+    "chn": "聖多美和普林西比",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 179,
+    "rus": "Аруба",
+    "eng": "Aruba",
+    "chn": "阿魯巴島",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 180,
+    "rus": "Монтсеррат",
+    "eng": "Montserrat",
+    "chn": "蒙特塞拉特",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 181,
+    "rus": "Ангилья",
+    "eng": "Anguilla",
+    "chn": "安圭拉島",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 182,
+    "rus": "Япония",
+    "eng": "Japan",
+    "chn": "日本",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 183,
+    "rus": "Северная Македония",
+    "eng": "North Macedonia",
+    "chn": "北馬其頓",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 184,
+    "rus": "Республика Сейшелы",
+    "eng": "Seychelles",
+    "chn": "塞舌爾共和國",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 185,
+    "rus": "Новая Каледония",
+    "eng": "New Caledonia",
+    "chn": "新喀裡多尼亞",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 186,
+    "rus": "Кабо-Верде",
+    "eng": "Cape Verde",
+    "chn": "佛得角",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 187,
+    "rus": "США",
+    "eng": "USA",
+    "chn": "美国（物理)",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 188,
+    "rus": "Палестина",
+    "eng": "Palestine",
+    "chn": "巴勒斯坦",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 189,
+    "rus": "Фиджи",
+    "eng": "Fiji",
+    "chn": "斐濟",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 190,
+    "rus": "Южная Корея",
+    "eng": "South Korea",
+    "chn": "大韓民國",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 191,
+    "rus": "Северная Корея",
+    "eng": "North Korea",
+    "chn": "朝鲜民主主义人民共和国",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 192,
+    "rus": "Западная Сахара",
+    "eng": "Western Sahara",
+    "chn": "撒哈拉沙漠西部",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 193,
+    "rus": "Соломоновы острова",
+    "eng": "Solomon Islands",
+    "chn": "所罗门群岛",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 194,
+    "rus": "Джерси",
+    "eng": "Jersey",
+    "chn": "泽西岛",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 195,
+    "rus": "Бермуды",
+    "eng": "Bermuda",
+    "chn": "百慕大",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 196,
+    "rus": "Сингапур",
+    "eng": "Singapore",
+    "chn": "新加坡共和国",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 197,
+    "rus": "Тонга",
+    "eng": "Tonga",
+    "chn": "汤加王国",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 198,
+    "rus": "Самоа",
+    "eng": "Samoa",
+    "chn": "萨摩亚",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 199,
+    "rus": "Мальта",
+    "eng": "Malta",
+    "chn": "马耳他",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 200,
+    "rus": "Лихтенштейн",
+    "eng": "Liechtenstein",
+    "chn": "列支敦士登",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 201,
+    "rus": "Гибралтар",
+    "eng": "Gibraltar",
+    "chn": "直布罗陀",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 202,
+    "rus": "Фарерские острова",
+    "eng": "Faroe Islands",
+    "chn": "法罗群岛",
+    "visible": 0,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 203,
+    "rus": "Косово",
+    "eng": "Kosovo",
+    "chn": "科索沃",
+    "visible": 1,
+    "retry": 1,
+    "rent": 0,
+    "multiService": 0
+  },
+  {
+    "id": 204,
+    "rus": "Ниуэ",
+    "eng": "Niue",
+    "chn": "纽埃",
+    "visible": 1,
+    "retry": 0,
+    "rent": 0,
+    "multiService": 0
+  }
+]

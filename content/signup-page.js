@@ -872,12 +872,6 @@ function getPhoneDigits(phoneNumber = '') {
   return String(phoneNumber || '').replace(/\D/g, '');
 }
 
-const FIXED_PHONE_COUNTRY = {
-  key: 'TH',
-  dialCode: '66',
-  name: '泰国',
-};
-
 function getPhoneCountryOptionDialCode(option) {
   if (!option) {
     return '';
@@ -932,6 +926,63 @@ function setPhoneCountryHiddenSelectValue(countryKey = '') {
   return true;
 }
 
+function getSelectedPhoneCountryKey() {
+  const select = getPhoneCountryHiddenSelect();
+  if (!select) {
+    return '';
+  }
+
+  const value = String(select.value || '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(value) ? value : '';
+}
+
+function normalizePhoneCountryMatchText(text = '') {
+  return String(text || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizePhoneCountryTarget(country = null) {
+  if (!country || typeof country !== 'object' || Array.isArray(country)) {
+    return {
+      key: '',
+      dialCode: '',
+      name: '',
+      names: [],
+    };
+  }
+
+  const key = String(country.key || country.countryKey || '').trim().toUpperCase();
+  const dialCode = String(country.dialCode || country.callingCode || '').replace(/\D/g, '');
+  const rawNames = [
+    country.name,
+    country.chn,
+    country.eng,
+    country.rus,
+    ...(Array.isArray(country.names) ? country.names : []),
+  ];
+  const names = [];
+  const seen = new Set();
+  for (const item of rawNames) {
+    const normalized = String(item || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+    const matchKey = normalizePhoneCountryMatchText(normalized);
+    if (!matchKey || seen.has(matchKey)) continue;
+    seen.add(matchKey);
+    names.push(normalized);
+  }
+
+  return {
+    key: /^[A-Z]{2}$/.test(key) ? key : '',
+    dialCode,
+    name: names[0] || '',
+    names,
+  };
+}
+
 function findPhoneCountryOptionForNumber(phoneNumber = '') {
   const digits = getPhoneDigits(phoneNumber);
   if (!digits) {
@@ -955,42 +1006,77 @@ function findPhoneCountryOptionForNumber(phoneNumber = '') {
   return matches[0]?.option || null;
 }
 
-function findFixedPhoneCountryOption() {
+function findPhoneCountryOptionByTarget(country = null) {
+  const target = normalizePhoneCountryTarget(country);
   const options = Array.from(document.querySelectorAll('[role="option"]'))
     .filter((option) => option.getAttribute('aria-disabled') !== 'true');
   if (!options.length) {
     return null;
   }
 
-  return options.find((option) => {
-    const countryKey = getPhoneCountryOptionKey(option);
-    if (countryKey === FIXED_PHONE_COUNTRY.key) {
-      return true;
+  if (target.key) {
+    const keyMatchedOption = options.find((option) => getPhoneCountryOptionKey(option) === target.key);
+    if (keyMatchedOption) {
+      return keyMatchedOption;
     }
-
-    const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
-    return text.includes(FIXED_PHONE_COUNTRY.name)
-      || text.includes(`+${FIXED_PHONE_COUNTRY.dialCode}`)
-      || text.includes(`+(${FIXED_PHONE_COUNTRY.dialCode})`);
-  }) || null;
-}
-
-async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
-  const currentDialCode = getSelectedPhoneCountryDialCode();
-  if (currentDialCode === FIXED_PHONE_COUNTRY.dialCode) {
-    return { matched: true, changed: false, dialCode: currentDialCode };
   }
 
-  const hiddenSelectChanged = setPhoneCountryHiddenSelectValue(FIXED_PHONE_COUNTRY.key);
+  if (target.names.length) {
+    const nameMatchedOption = options.find((option) => {
+      const optionText = normalizePhoneCountryMatchText(`${getActionText(option) || ''} ${option.textContent || ''}`);
+      return target.names.some((name) => optionText.includes(normalizePhoneCountryMatchText(name)));
+    });
+    if (nameMatchedOption) {
+      return nameMatchedOption;
+    }
+  }
+
+  if (target.dialCode) {
+    return options.find((option) => {
+      const text = `${getActionText(option) || ''} ${option.textContent || ''}`.replace(/\s+/g, ' ').trim();
+      return text.includes(`+${target.dialCode}`) || text.includes(`+(${target.dialCode})`);
+    }) || null;
+  }
+
+  return null;
+}
+
+async function ensurePhoneCountryMatchesNumber(phoneNumber = '', country = null) {
+  const targetCountry = normalizePhoneCountryTarget(country);
+  const currentCountryKey = getSelectedPhoneCountryKey();
+  const currentDialCode = getSelectedPhoneCountryDialCode();
+  if (targetCountry.key && currentCountryKey === targetCountry.key) {
+    return {
+      matched: true,
+      changed: false,
+      dialCode: currentDialCode,
+      countryKey: currentCountryKey,
+      countryName: targetCountry.name,
+    };
+  }
+  if (targetCountry.dialCode && currentDialCode === targetCountry.dialCode) {
+    return {
+      matched: true,
+      changed: false,
+      dialCode: currentDialCode,
+      countryKey: currentCountryKey,
+      countryName: targetCountry.name,
+    };
+  }
+
+  const hiddenSelectChanged = targetCountry.key ? setPhoneCountryHiddenSelectValue(targetCountry.key) : false;
   if (hiddenSelectChanged) {
     await sleep(250);
+    const selectedCountryKey = getSelectedPhoneCountryKey();
     const selectedDialCode = getSelectedPhoneCountryDialCode();
-    if (selectedDialCode === FIXED_PHONE_COUNTRY.dialCode) {
+    if ((targetCountry.key && selectedCountryKey === targetCountry.key)
+      || (targetCountry.dialCode && selectedDialCode === targetCountry.dialCode)) {
       return {
         matched: true,
-        changed: currentDialCode !== FIXED_PHONE_COUNTRY.dialCode,
-        dialCode: FIXED_PHONE_COUNTRY.dialCode,
-        countryKey: FIXED_PHONE_COUNTRY.key,
+        changed: currentCountryKey !== selectedCountryKey || currentDialCode !== selectedDialCode,
+        dialCode: selectedDialCode,
+        countryKey: selectedCountryKey,
+        countryName: targetCountry.name,
       };
     }
   }
@@ -1007,7 +1093,7 @@ async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
   let option = null;
   while (Date.now() - start < 5000) {
     throwIfStopped();
-    option = findFixedPhoneCountryOption();
+    option = findPhoneCountryOptionByTarget(targetCountry) || findPhoneCountryOptionForNumber(phoneNumber);
     if (option) {
       break;
     }
@@ -1020,10 +1106,10 @@ async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
     return { matched: false, changed: false, dialCode: currentDialCode || '' };
   }
 
-  const matchedDialCode = getPhoneCountryOptionDialCode(option) || FIXED_PHONE_COUNTRY.dialCode;
-  const matchedCountryKey = getPhoneCountryOptionKey(option);
+  const matchedDialCode = getPhoneCountryOptionDialCode(option) || targetCountry.dialCode;
+  const matchedCountryKey = getPhoneCountryOptionKey(option) || targetCountry.key;
   log(
-    `手机号验证：已定位到固定国家选项 ${getActionText(option) || option.textContent || matchedCountryKey || matchedDialCode}`,
+    `手机号验证：已定位到国家选项 ${getActionText(option) || option.textContent || targetCountry.name || matchedCountryKey || matchedDialCode}`,
     'info'
   );
 
@@ -1037,13 +1123,16 @@ async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
   const waitSelectionStart = Date.now();
   while (Date.now() - waitSelectionStart < 2000) {
     throwIfStopped();
+    const selectedCountryKey = getSelectedPhoneCountryKey();
     const selectedDialCode = getSelectedPhoneCountryDialCode();
-    if (matchedDialCode && selectedDialCode === matchedDialCode) {
+    if ((matchedCountryKey && selectedCountryKey === matchedCountryKey)
+      || (matchedDialCode && selectedDialCode === matchedDialCode)) {
       return {
         matched: true,
-        changed: currentDialCode !== matchedDialCode,
+        changed: currentCountryKey !== selectedCountryKey || currentDialCode !== selectedDialCode,
         dialCode: matchedDialCode,
         countryKey: matchedCountryKey,
+        countryName: targetCountry.name,
       };
     }
     await sleep(120);
@@ -1051,13 +1140,16 @@ async function ensurePhoneCountryMatchesNumber(phoneNumber = '') {
 
   if (optionHiddenSelectChanged || hiddenSelectChanged) {
     await sleep(250);
+    const selectedCountryKey = getSelectedPhoneCountryKey();
     const selectedDialCode = getSelectedPhoneCountryDialCode();
-    if (matchedDialCode && selectedDialCode === matchedDialCode) {
+    if ((matchedCountryKey && selectedCountryKey === matchedCountryKey)
+      || (matchedDialCode && selectedDialCode === matchedDialCode)) {
       return {
         matched: true,
-        changed: currentDialCode !== matchedDialCode,
+        changed: currentCountryKey !== selectedCountryKey || currentDialCode !== selectedDialCode,
         dialCode: matchedDialCode,
         countryKey: matchedCountryKey,
+        countryName: targetCountry.name,
       };
     }
   }
@@ -1300,7 +1392,7 @@ async function waitForPhoneNumberInputReady(timeout = 12000) {
 }
 
 async function submitPhoneNumber(payload = {}) {
-  const { phoneNumber } = payload;
+  const { phoneNumber, phoneCountry } = payload;
   if (!phoneNumber) {
     throw new Error('未提供手机号。');
   }
@@ -1323,10 +1415,10 @@ async function submitPhoneNumber(payload = {}) {
     throw new Error('手机号页面未找到可点击的发送验证码按钮。URL: ' + location.href);
   }
 
-  const countryMatch = await ensurePhoneCountryMatchesNumber(phoneNumber);
+  const countryMatch = await ensurePhoneCountryMatchesNumber(phoneNumber, phoneCountry);
   if (countryMatch.matched) {
     log(
-      `手机号验证：已${countryMatch.changed ? '自动切换' : '确认'}国家区号 +${countryMatch.dialCode || getSelectedPhoneCountryDialCode() || '?'}`,
+      `手机号验证：已${countryMatch.changed ? '自动切换' : '确认'}国家${countryMatch.countryName ? ` ${countryMatch.countryName}` : ''} 区号 +${countryMatch.dialCode || getSelectedPhoneCountryDialCode() || '?'}`,
       'info'
     );
   } else {

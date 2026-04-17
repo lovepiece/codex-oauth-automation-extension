@@ -8,32 +8,6 @@
 
 一百五十个号，一个401：
 
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/交流群.jpg" alt="QQ交流群，便于大家交流" width="100%" />
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/十轮自动.png" alt="最新版本运行日志" width="100%" />
-    </td>
-  </tr>
-</table>
-
-## 打赏一下
-
-佬们觉得好用的话，也可以打赏小弟一杯奶茶哦
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/支付宝.jpg" alt="支付宝收款码" width="100%" />
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/微信.png" alt="微信收款码" width="100%" />
-    </td>
-  </tr>
-</table>
-
 ## Star History
 
 <a href="https://www.star-history.com/?repos=QLHazyCoder%2Fcodex-oauth-automation-extension&type=timeline&logscale&legend=top-left">
@@ -62,6 +36,7 @@
 - 支持 `Auto` 多轮运行
 - 支持中途 `Stop`
 - Step 8 会自动寻找 OAuth 同意页的“继续”按钮，并通过 Chrome debugger 输入事件发起点击，然后监听本地回调地址
+- 修复了自建cf worker邮箱，增加了HeroSMS接码的功能。
 
 
 ## 环境要求
