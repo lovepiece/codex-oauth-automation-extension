@@ -60,11 +60,11 @@ function createRouter(overrides = {}) {
     handleCloudflareSecurityBlocked: overrides.handleCloudflareSecurityBlocked || (async (error) => {
       const message = typeof error === 'string' ? error : error?.message || '';
       events.securityBlocks.push(message);
-      return message.replace(/^(?:CF_SECURITY_BLOCKED|NETWORK_TIMEOUT_BLOCKED)::/, '') || message;
+      return message.replace(/^CF_SECURITY_BLOCKED::/, '') || message;
     }),
     importSettingsBundle: async () => {},
     invalidateDownstreamAfterStepRestart: async () => {},
-    isCloudflareSecurityBlockedError: overrides.isCloudflareSecurityBlockedError || ((error) => /^(?:CF_SECURITY_BLOCKED|NETWORK_TIMEOUT_BLOCKED)::/.test(typeof error === 'string' ? error : error?.message || '')),
+    isCloudflareSecurityBlockedError: overrides.isCloudflareSecurityBlockedError || ((error) => /^CF_SECURITY_BLOCKED::/.test(typeof error === 'string' ? error : error?.message || '')),
     isAutoRunLockedState: () => false,
     isHotmailProvider: () => false,
     isLocalhostOAuthCallbackUrl: () => true,
@@ -224,28 +224,5 @@ test('message router stops the flow and surfaces cloudflare security block error
   assert.deepStrictEqual(response, {
     ok: true,
     error: '您已触发Cloudflare 安全防护系统',
-  });
-});
-test('message router stops the flow and surfaces network timeout block errors', async () => {
-  const { router, events } = createRouter();
-
-  const response = await router.handleMessage({
-    type: 'STEP_ERROR',
-    step: 7,
-    source: 'signup-page',
-    payload: {},
-    error: 'NETWORK_TIMEOUT_BLOCKED::请检查当前网络节点是否稳定',
-  }, {});
-
-  assert.deepStrictEqual(events.securityBlocks, ['NETWORK_TIMEOUT_BLOCKED::请检查当前网络节点是否稳定']);
-  assert.deepStrictEqual(events.notifyErrors, [
-    {
-      step: 7,
-      error: '流程已被用户停止。',
-    },
-  ]);
-  assert.deepStrictEqual(response, {
-    ok: true,
-    error: '请检查当前网络节点是否稳定',
   });
 });

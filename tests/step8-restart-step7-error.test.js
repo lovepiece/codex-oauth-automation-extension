@@ -87,8 +87,6 @@ test('ensureStep8VerificationPageReady throws cloudflare security block error on
   const api = new Function(`
 const CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX = 'CF_SECURITY_BLOCKED::';
 const CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE = 'cloudflare blocked';
-const NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX = 'NETWORK_TIMEOUT_BLOCKED::';
-const NETWORK_TIMEOUT_BLOCK_USER_MESSAGE = 'network timeout blocked';
 
 function getLoginAuthStateLabel(state) {
   return state === 'login_timeout_error_page' ? 'login timeout page' : 'unknown page';
@@ -114,40 +112,6 @@ return {
   await assert.rejects(
     () => api.run(),
     /CF_SECURITY_BLOCKED::/
-  );
-});
-
-test('ensureStep8VerificationPageReady throws network timeout block error on operation timed out page', async () => {
-  const api = new Function(`
-const CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX = 'CF_SECURITY_BLOCKED::';
-const CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE = 'cloudflare blocked';
-const NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX = 'NETWORK_TIMEOUT_BLOCKED::';
-const NETWORK_TIMEOUT_BLOCK_USER_MESSAGE = 'network timeout blocked';
-
-function getLoginAuthStateLabel(state) {
-  return state === 'login_timeout_error_page' ? 'login timeout page' : 'unknown page';
-}
-
-async function getLoginAuthStateFromContent() {
-  return {
-    state: 'login_timeout_error_page',
-    url: 'https://auth.openai.com/log-in',
-    operationTimedOutBlocked: true,
-  };
-}
-
-${extractFunction(backgroundSource, 'ensureStep8VerificationPageReady')}
-
-return {
-  run() {
-    return ensureStep8VerificationPageReady({});
-  },
-};
-`)();
-
-  await assert.rejects(
-    () => api.run(),
-    /NETWORK_TIMEOUT_BLOCKED::/
   );
 });
 

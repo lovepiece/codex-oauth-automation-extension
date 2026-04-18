@@ -79,7 +79,6 @@ test('auth page recovery detects retry page state', () => {
   assert.equal(snapshot.titleMatched, true);
   assert.equal(snapshot.detailMatched, false);
   assert.equal(snapshot.maxCheckAttemptsBlocked, false);
-  assert.equal(snapshot.operationTimedOutBlocked, false);
 });
 
 test('auth page recovery clicks retry and waits until page recovers', async () => {
@@ -157,21 +156,3 @@ test('auth page recovery throws cloudflare security blocked error on max_check_a
   );
 });
 
-test('auth page recovery throws network timeout block error on operation timed out page', async () => {
-  const state = {
-    clickCount: 0,
-    pageText: 'Something went wrong. Operation timed out.',
-    retryVisible: true,
-  };
-  const api = createRecoveryApi(state);
-
-  await assert.rejects(
-    () => api.recoverAuthRetryPage({
-      logLabel: '步骤 7：检测到登录超时报错，正在点击“重试”恢复当前页面',
-      pathPatterns: [/\/log-in(?:[/?#]|$)/i],
-      step: 7,
-      timeoutMs: 1000,
-    }),
-    /NETWORK_TIMEOUT_BLOCKED::/
-  );
-});

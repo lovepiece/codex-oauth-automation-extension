@@ -66,9 +66,8 @@
         ? detailPattern.test(text)
         : false;
       const maxCheckAttemptsBlocked = /max_check_attempts/i.test(text);
-      const operationTimedOutBlocked = /operation\s+timed\s+out/i.test(text);
 
-      if (!titleMatched && !detailMatched && !maxCheckAttemptsBlocked && !operationTimedOutBlocked) {
+      if (!titleMatched && !detailMatched && !maxCheckAttemptsBlocked) {
         return null;
       }
 
@@ -80,7 +79,6 @@
         titleMatched,
         detailMatched,
         maxCheckAttemptsBlocked,
-        operationTimedOutBlocked,
       };
     }
 
@@ -143,12 +141,6 @@
         if (retryState.maxCheckAttemptsBlocked) {
           throw new Error(
             'CF_SECURITY_BLOCKED::您已触发Cloudflare 安全防护系统，已完全停止流程，请不要短时间内多次进行重新发送验证码，连续刷新、反复点击重试会加重风控；请先关闭页面等待 15-30 分钟，让系统的临时限制自动解除。或者更换浏览器'
-          );
-        }
-
-        if (retryState.operationTimedOutBlocked) {
-          throw new Error(
-            'NETWORK_TIMEOUT_BLOCKED::请检查当前网络节点是否稳定，若你使用的代理 /VPN 节点无延迟过高问题，请换一个服务器继续使用此邮箱继续登陆'
           );
         }
 

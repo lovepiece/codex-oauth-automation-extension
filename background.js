@@ -134,8 +134,6 @@ const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 const CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX = 'CF_SECURITY_BLOCKED::';
 const CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE = '您已触发Cloudflare 安全防护系统，已完全停止流程，请不要短时间内多次进行重新发送验证码，连续刷新、反复点击重试会加重风控；请先关闭页面等待 15-30 分钟，让系统的临时限制自动解除。或者更换浏览器';
-const NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX = 'NETWORK_TIMEOUT_BLOCKED::';
-const NETWORK_TIMEOUT_BLOCK_USER_MESSAGE = '请检查当前网络节点是否稳定，若你使用的代理 /VPN 节点无延迟过高问题，请换一个服务器继续使用此邮箱继续登陆';
 const HUMAN_STEP_DELAY_MIN = 700;
 const HUMAN_STEP_DELAY_MAX = 2200;
 const STEP6_MAX_ATTEMPTS = 3;
@@ -3844,12 +3842,8 @@ function isCloudflareSecurityBlockedError(error) {
   return getErrorMessage(error).startsWith(CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX);
 }
 
-function isNetworkTimeoutBlockedError(error) {
-  return getErrorMessage(error).startsWith(NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX);
-}
-
 function isTerminalSecurityBlockedError(error) {
-  return isCloudflareSecurityBlockedError(error) || isNetworkTimeoutBlockedError(error);
+  return isCloudflareSecurityBlockedError(error);
 }
 
 function getCloudflareSecurityBlockedMessage(error) {
@@ -3860,32 +3854,15 @@ function getCloudflareSecurityBlockedMessage(error) {
   return CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE;
 }
 
-function getNetworkTimeoutBlockedMessage(error) {
-  const message = getErrorMessage(error);
-  if (message.startsWith(NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX)) {
-    return message.slice(NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX.length).trim() || NETWORK_TIMEOUT_BLOCK_USER_MESSAGE;
-  }
-  return NETWORK_TIMEOUT_BLOCK_USER_MESSAGE;
-}
-
 function getTerminalSecurityBlockedMessage(error) {
-  if (isNetworkTimeoutBlockedError(error)) {
-    return getNetworkTimeoutBlockedMessage(error);
-  }
   return getCloudflareSecurityBlockedMessage(error);
 }
 
 function getTerminalSecurityBlockedAlertText(error) {
-  if (isNetworkTimeoutBlockedError(error)) {
-    return '检测到网络节点异常，请暂停当前操作。';
-  }
   return '检测到 Cloudflare 风控，请暂停当前操作。';
 }
 
 function getTerminalSecurityBlockedTitle(error) {
-  if (isNetworkTimeoutBlockedError(error)) {
-    return '网络节点异常';
-  }
   return 'Cloudflare 风控拦截';
 }
 
@@ -6542,9 +6519,6 @@ async function ensureStep8VerificationPageReady(options = {}) {
   if (pageState.maxCheckAttemptsBlocked) {
     throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
   }
-  if (pageState.operationTimedOutBlocked) {
-    throw new Error(`${NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX}${NETWORK_TIMEOUT_BLOCK_USER_MESSAGE}`);
-  }
 
   if (pageState.state === 'login_timeout_error_page') {
     const urlPart = pageState.url ? ` URL: ${pageState.url}` : '';
@@ -6696,9 +6670,6 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS)
     const pageState = await getStep8PageState(tabId);
     if (pageState?.maxCheckAttemptsBlocked) {
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
-    }
-    if (pageState?.operationTimedOutBlocked) {
-      throw new Error(`${NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX}${NETWORK_TIMEOUT_BLOCK_USER_MESSAGE}`);
     }
     if (pageState?.addPhonePage) {
       throw new Error('步骤 9：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
@@ -6877,9 +6848,6 @@ async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLI
     const pageState = await getStep8PageState(tabId);
     if (pageState?.maxCheckAttemptsBlocked) {
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
-    }
-    if (pageState?.operationTimedOutBlocked) {
-      throw new Error(`${NETWORK_TIMEOUT_BLOCK_ERROR_PREFIX}${NETWORK_TIMEOUT_BLOCK_USER_MESSAGE}`);
     }
     if (pageState?.addPhonePage) {
       throw new Error('步骤 9：点击“继续”后页面跳到了手机号页面，当前流程无法继续自动授权。');
