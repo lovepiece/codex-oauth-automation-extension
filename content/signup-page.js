@@ -877,6 +877,30 @@ function getPhoneDigits(phoneNumber = '') {
   return String(phoneNumber || '').replace(/\D/g, '');
 }
 
+function buildInternationalPhoneValue(phoneNumber = '', country = null) {
+  const rawValue = String(phoneNumber || '').trim();
+  if (!rawValue) {
+    return '';
+  }
+
+  if (rawValue.startsWith('+')) {
+    const normalizedPrefixed = `+${rawValue.slice(1).replace(/\D/g, '')}`;
+    return normalizedPrefixed === '+' ? rawValue : normalizedPrefixed;
+  }
+
+  const digits = getPhoneDigits(rawValue);
+  if (!digits) {
+    return rawValue;
+  }
+
+  const target = normalizePhoneCountryTarget(country);
+  const normalizedDigits = target.dialCode && !digits.startsWith(target.dialCode)
+    ? `${target.dialCode}${digits}`
+    : digits;
+
+  return `+${normalizedDigits}`;
+}
+
 function buildFixedPhoneCountryFallbackValue(phoneNumber = '', country = FIXED_PHONE_COUNTRY_FALLBACK) {
   const rawValue = String(phoneNumber || '').trim();
   const digits = getPhoneDigits(rawValue);
@@ -1312,6 +1336,69 @@ function normalizePhoneNumberForOpenAiForm(phoneNumber = '') {
   return normalized.replace(/\D/g, '');
 }
 
+async function tryAutoSelectPhoneCountryByTyping(phoneInput, hiddenPhoneInput, phoneNumber = '', phoneCountry = null) {
+  if (!phoneInput) {
+    return {
+      matched: false,
+      autoSelected: false,
+      phoneInputValue: '',
+      hiddenValue: '',
+    };
+  }
+
+  const internationalValue = buildInternationalPhoneValue(phoneNumber, phoneCountry);
+  if (!internationalValue) {
+    return {
+      matched: false,
+      autoSelected: false,
+      phoneInputValue: '',
+      hiddenValue: '',
+    };
+  }
+
+  const targetCountry = normalizePhoneCountryTarget(phoneCountry);
+  const fallbackDialCodeMatch = internationalValue.match(/^\+(\d{1,4})/);
+  const fallbackDialCode = fallbackDialCodeMatch ? fallbackDialCodeMatch[1] : '';
+
+  fillInput(phoneInput, internationalValue);
+  if (hiddenPhoneInput) {
+    fillInput(hiddenPhoneInput, internationalValue);
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < 1800) {
+    throwIfStopped();
+    const selectedCountryKey = getSelectedPhoneCountryKey();
+    const selectedDialCode = getSelectedPhoneCountryDialCode();
+    const matched = (targetCountry.key && selectedCountryKey === targetCountry.key)
+      || (targetCountry.dialCode && selectedDialCode === targetCountry.dialCode)
+      || (selectedDialCode && getPhoneDigits(internationalValue).startsWith(selectedDialCode))
+      || (fallbackDialCode && selectedDialCode === fallbackDialCode);
+    if (matched) {
+      return {
+        matched: true,
+        autoSelected: true,
+        dialCode: selectedDialCode || targetCountry.dialCode || fallbackDialCode,
+        countryKey: selectedCountryKey || targetCountry.key || '',
+        countryName: targetCountry.name,
+        phoneInputValue: internationalValue,
+        hiddenValue: internationalValue,
+      };
+    }
+    await sleep(120);
+  }
+
+  return {
+    matched: false,
+    autoSelected: false,
+    dialCode: getSelectedPhoneCountryDialCode() || targetCountry.dialCode || fallbackDialCode,
+    countryKey: getSelectedPhoneCountryKey() || targetCountry.key || '',
+    countryName: targetCountry.name,
+    phoneInputValue: internationalValue,
+    hiddenValue: internationalValue,
+  };
+}
+
 function getPhoneVerificationActionButton({ allowDisabled = false } = {}) {
   const candidates = document.querySelectorAll(
     'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
@@ -1529,21 +1616,39 @@ async function submitPhoneNumber(payload = {}) {
     throw new Error('手机号页面未找到可点击的发送验证码按钮。URL: ' + location.href);
   }
 
-  const countryMatch = await ensurePhoneCountryMatchesNumber(phoneNumber, phoneCountry);
-  if (countryMatch.matched) {
+  await humanPause(450, 1100);
+  const hiddenPhoneInput = getPhoneNumberHiddenInput();
+  const autoCountryMatch = await tryAutoSelectPhoneCountryByTyping(phoneInput, hiddenPhoneInput, phoneNumber, phoneCountry);
+  let countryMatch = autoCountryMatch;
+  let phoneInputValue = autoCountryMatch.phoneInputValue || '';
+  let hiddenValue = autoCountryMatch.hiddenValue || '';
+
+  if (countryMatch.matched && countryMatch.autoSelected) {
+    log(
+      `手机号验证：已通过填写国际号码自动匹配国家${countryMatch.countryName ? ` ${countryMatch.countryName}` : ''} 区号 +${countryMatch.dialCode || getSelectedPhoneCountryDialCode() || '?'}`,
+      'info'
+    );
+  } else {
+    countryMatch = await ensurePhoneCountryMatchesNumber(phoneNumber, phoneCountry);
+  }
+
+  if (countryMatch.matched && !countryMatch.autoSelected) {
     log(
       `手机号验证：已${countryMatch.changed ? '自动切换' : '确认'}国家${countryMatch.countryName ? ` ${countryMatch.countryName}` : ''} 区号 +${countryMatch.dialCode || getSelectedPhoneCountryDialCode() || '?'}`,
       'info'
     );
-  } else {
+  } else if (!countryMatch.matched) {
     log('手机号验证：未能自动匹配国家区号，将按泰国 +66 保底方式继续填写。', 'error');
   }
 
-  await humanPause(450, 1100);
   const fullDigitsPhoneNumber = getPhoneDigits(phoneNumber);
-  const hiddenPhoneInput = getPhoneNumberHiddenInput();
-  let phoneInputValue = fullDigitsPhoneNumber || phoneNumber;
-  let hiddenValue = fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim();
+  if (!phoneInputValue) {
+    phoneInputValue = fullDigitsPhoneNumber || phoneNumber;
+  }
+  if (!hiddenValue) {
+    hiddenValue = fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim();
+  }
+
   if (!countryMatch.matched) {
     setPhoneCountryHiddenSelectValue(FIXED_PHONE_COUNTRY_FALLBACK.key);
     const fallbackValue = buildFixedPhoneCountryFallbackValue(phoneNumber, FIXED_PHONE_COUNTRY_FALLBACK);
@@ -1551,9 +1656,15 @@ async function submitPhoneNumber(payload = {}) {
     hiddenValue = fallbackValue || hiddenValue;
   }
 
-  fillInput(phoneInput, phoneInputValue);
+  const currentPhoneInputValue = String(phoneInput.value || '').trim();
+  if (currentPhoneInputValue !== String(phoneInputValue || '').trim()) {
+    fillInput(phoneInput, phoneInputValue);
+  }
   if (hiddenPhoneInput) {
-    fillInput(hiddenPhoneInput, hiddenValue);
+    const currentHiddenValue = String(hiddenPhoneInput.value || '').trim();
+    if (currentHiddenValue !== String(hiddenValue || '').trim()) {
+      fillInput(hiddenPhoneInput, hiddenValue);
+    }
   }
   log(`手机号验证：已填写完整手机号 ${hiddenValue || phoneInputValue || fullDigitsPhoneNumber || phoneNumber}`);
   await sleep(500);
