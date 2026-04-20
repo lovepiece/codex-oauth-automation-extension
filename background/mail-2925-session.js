@@ -17,6 +17,7 @@
       isAutoRunLockedState,
       requestStop,
       reuseOrCreateTab,
+      sendToContentScriptResilient,
       sendToMailContentScriptResilient,
       setPersistentSettings,
       setState,
@@ -126,6 +127,20 @@
 
     function getCurrentMail2925Account(state = {}) {
       return findMail2925Account(state.mail2925Accounts, state.currentMail2925AccountId) || null;
+    }
+
+    async function getMail2925CurrentTabUrl() {
+      try {
+        const state = await getState();
+        const tabId = Number(state?.tabRegistry?.[MAIL2925_SOURCE]?.tabId || 0);
+        if (!Number.isInteger(tabId) || tabId <= 0) {
+          return '';
+        }
+        const tab = await chrome.tabs.get(tabId);
+        return String(tab?.url || '').trim();
+      } catch {
+        return '';
+      }
     }
 
     async function setCurrentMail2925Account(accountId, options = {}) {
@@ -376,6 +391,9 @@
         inject: MAIL2925_INJECT,
         injectSource: MAIL2925_INJECT_SOURCE,
       });
+      if (forceRelogin && typeof sleepWithStop === 'function') {
+        await sleepWithStop(3000);
+      }
 
       let result;
       try {
@@ -398,6 +416,8 @@
         }
       );
       } catch (err) {
+        const failedUrl = await getMail2925CurrentTabUrl();
+        await addLog(`2925：ENSURE_MAIL2925_SESSION 通信失败，当前地址=${failedUrl || 'unknown'}；原因=${getErrorMessage(err) || 'unknown'}`, 'warn');
         const stopped = await stopAutoRunForMail2925LoginFailure(
           `2925：${actionLabel}失败（${getErrorMessage(err) || '20 秒内未进入收件箱'}），已按手动停止逻辑暂停自动流程。`
         );
@@ -408,6 +428,8 @@
       }
 
       if (!result?.loggedIn) {
+        const notLoggedInUrl = await getMail2925CurrentTabUrl();
+        await addLog(`2925：20 秒登录等待结束但仍未进入收件箱，当前地址=${notLoggedInUrl || 'unknown'}`, 'warn');
         const stopped = await stopAutoRunForMail2925LoginFailure(
           `2925：${actionLabel}失败（20 秒内未进入收件箱），已按手动停止逻辑暂停自动流程。`
         );
@@ -418,6 +440,8 @@
       }
 
       if (result?.error) {
+        const resultErrorUrl = await getMail2925CurrentTabUrl();
+        await addLog(`2925：登录页返回业务错误，当前地址=${resultErrorUrl || 'unknown'}；错误=${result.error}`, 'warn');
         const stopped = await stopAutoRunForMail2925LoginFailure(
           `2925：${actionLabel}失败（${result.error}），已按手动停止逻辑暂停自动流程。`
         );
@@ -439,6 +463,129 @@
       });
       await setState({ currentMail2925AccountId: account.id });
       broadcastDataUpdate({ currentMail2925AccountId: account.id });
+
+      return {
+        account: await ensureMail2925AccountForFlow({
+          allowAllocate: false,
+          preferredAccountId: account.id,
+        }),
+        mail: getMail2925MailConfig(),
+        result,
+      };
+    }
+
+    // Override the earlier version with a simpler login-page-only flow.
+    async function ensureMail2925MailboxSession(options = {}) {
+      const {
+        accountId = null,
+        forceRelogin = false,
+        actionLabel = '确保 2925 邮箱登录态',
+      } = options;
+      const account = await ensureMail2925AccountForFlow({
+        allowAllocate: true,
+        preferredAccountId: accountId,
+      });
+
+      if (forceRelogin) {
+        const removedCount = await clearMail2925SessionCookies();
+        await addLog(`2925：已清理 ${removedCount} 个登录相关 cookie，准备使用 ${account.email} 重新登录。`, 'info');
+        if (typeof sleepWithStop === 'function') {
+          await addLog('2925：清理 cookie 后等待 3 秒，再打开登录页...', 'info');
+          await sleepWithStop(3000);
+        }
+      }
+
+      throwIfStopped();
+      await addLog(`2925：准备打开登录页 ${MAIL2925_LOGIN_URL}（forceRelogin=${forceRelogin ? 'true' : 'false'}）`, 'info');
+      await reuseOrCreateTab(MAIL2925_SOURCE, forceRelogin ? MAIL2925_LOGIN_URL : MAIL2925_URL, {
+        inject: MAIL2925_INJECT,
+        injectSource: MAIL2925_INJECT_SOURCE,
+      });
+      const openedUrl = await getMail2925CurrentTabUrl();
+      await addLog(`2925：打开页后当前标签地址：${openedUrl || 'unknown'}`, 'info');
+
+      if (forceRelogin && typeof sleepWithStop === 'function') {
+        await addLog('2925：登录页已打开，等待 3 秒后开始检查输入框并执行登录...', 'info');
+        await sleepWithStop(3000);
+      }
+
+      const sendLoginMessage = typeof sendToContentScriptResilient === 'function'
+        ? sendToContentScriptResilient
+        : async (source, message, runtimeOptions = {}) => sendToMailContentScriptResilient(
+          getMail2925MailConfig(),
+          message,
+          {
+            timeoutMs: runtimeOptions.timeoutMs,
+            responseTimeoutMs: runtimeOptions.responseTimeoutMs,
+            maxRecoveryAttempts: 0,
+          }
+        );
+
+      let result;
+      try {
+        const beforeSendUrl = await getMail2925CurrentTabUrl();
+        await addLog(`2925：发送 ENSURE_MAIL2925_SESSION 前当前地址：${beforeSendUrl || 'unknown'}`, 'info');
+        result = await sendLoginMessage(
+          MAIL2925_SOURCE,
+          {
+            type: 'ENSURE_MAIL2925_SESSION',
+            step: 0,
+            source: 'background',
+            payload: {
+              email: account.email,
+              password: account.password,
+              forceLogin: forceRelogin,
+            },
+          },
+          {
+            timeoutMs: forceRelogin ? 30000 : 25000,
+            retryDelayMs: 800,
+            responseTimeoutMs: forceRelogin ? 30000 : 25000,
+            logMessage: `步骤 0：2925 登录页通信异常，正在等待当前页面重新就绪后继续确认登录态...`,
+          }
+        );
+      } catch (err) {
+        const stopped = await stopAutoRunForMail2925LoginFailure(
+          `2925：${actionLabel}失败（${getErrorMessage(err) || '20 秒内未进入收件箱'}），已按手动停止逻辑暂停自动流程。`
+        );
+        if (stopped) {
+          throw new Error('流程已被用户停止。');
+        }
+        throw err;
+      }
+
+      if (result?.error) {
+        const stopped = await stopAutoRunForMail2925LoginFailure(
+          `2925：${actionLabel}失败（${result.error}），已按手动停止逻辑暂停自动流程。`
+        );
+        if (stopped) {
+          throw new Error('流程已被用户停止。');
+        }
+        throw new Error(result.error);
+      }
+
+      if (result?.limitReached) {
+        throw new Error(`${MAIL2925_LIMIT_ERROR_PREFIX}${result.limitMessage || '2925 子邮箱已达上限邮箱'}`);
+      }
+
+      if (!result?.loggedIn) {
+        const stopped = await stopAutoRunForMail2925LoginFailure(
+          `2925：${actionLabel}失败（20 秒内未进入收件箱），已按手动停止逻辑暂停自动流程。`
+        );
+        if (stopped) {
+          throw new Error('流程已被用户停止。');
+        }
+        throw new Error(`2925：${actionLabel}失败，当前页面仍未进入收件箱。`);
+      }
+
+      await patchMail2925Account(account.id, {
+        lastLoginAt: Date.now(),
+        lastError: '',
+      });
+      await setState({ currentMail2925AccountId: account.id });
+      broadcastDataUpdate({ currentMail2925AccountId: account.id });
+      const finalUrl = await getMail2925CurrentTabUrl();
+      await addLog(`2925：登录态确认成功，当前地址=${finalUrl || 'unknown'}`, 'ok');
 
       return {
         account: await ensureMail2925AccountForFlow({

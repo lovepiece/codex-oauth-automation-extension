@@ -5395,6 +5395,7 @@ const mail2925SessionManager = self.MultiPageBackgroundMail2925Session?.createMa
   pickMail2925AccountForRun,
   requestStop,
   reuseOrCreateTab,
+  sendToContentScriptResilient,
   sendToMailContentScriptResilient,
   setPersistentSettings,
   setState,

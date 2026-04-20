@@ -833,10 +833,12 @@ async function ensureMail2925Session(payload = {}) {
   const email = String(payload?.email || '').trim();
   const password = String(payload?.password || '');
   const forceLogin = Boolean(payload?.forceLogin);
+  log(`步骤 0：2925 登录态检查开始，当前地址 ${location.href}，forceLogin=${forceLogin ? 'true' : 'false'}`, 'info');
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     throwIfStopped();
     const currentState = detectMail2925ViewState();
+    log(`步骤 0：2925 登录页状态探测，第 ${attempt + 1}/10 次，状态=${currentState.view}，地址=${location.href}`, 'info');
     if (currentState.view === 'limit') {
       return {
         ok: false,
@@ -860,6 +862,7 @@ async function ensureMail2925Session(payload = {}) {
   }
 
   const loginState = detectMail2925ViewState();
+  log(`步骤 0：2925 准备执行登录，当前状态=${loginState.view}，地址=${location.href}`, 'info');
   if (loginState.view === 'mailbox') {
     return {
       ok: true,
@@ -892,9 +895,12 @@ async function ensureMail2925Session(payload = {}) {
   await sleep(150);
   fillInput(passwordInput, password);
   await sleep(200);
+  log(`步骤 0：2925 已定位到登录表单，准备点击“登录”，当前地址 ${location.href}`, 'info');
   simulateClick(loginButton);
+  log(`步骤 0：2925 已点击“登录”，点击后地址 ${location.href}`, 'info');
 
   const finalState = await waitForMail2925View('mailbox', 20000);
+  log(`步骤 0：2925 登录等待结束，状态=${finalState.view}，地址=${location.href}`, 'info');
   if (finalState.view !== 'mailbox') {
     throw new Error('2925：提交账号密码后未进入收件箱。');
   }
