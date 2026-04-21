@@ -3271,7 +3271,7 @@ const contributionModeManager = window.SidepanelContributionMode?.createContribu
   },
   constants: {
     contributionOauthUrl: 'https://apikey.qzz.io/oauth/',
-    contributionUploadUrl: 'https://apikey.qzz.io/',
+    contributionUploadUrl: 'https://apikey.qzz.io',
   },
 });
 const renderContributionMode = contributionModeManager?.render

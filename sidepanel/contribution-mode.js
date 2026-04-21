@@ -12,7 +12,7 @@
       constants = {},
     } = context;
 
-    const contributionUploadUrl = constants.contributionUploadUrl || 'https://apikey.qzz.io/';
+    const contributionUploadUrl = constants.contributionUploadUrl || 'https://apikey.qzz.io';
     const pollIntervalMs = Math.max(1500, Math.floor(Number(constants.pollIntervalMs) || 2500));
 
     const hiddenRows = [
@@ -171,6 +171,18 @@
 
     function getSummaryText(currentState = getLatestState()) {
       return normalizeString(currentState.contributionStatusMessage) || DEFAULT_COPY;
+    }
+
+    function getContributionUploadPageUrl() {
+      return normalizeString(contributionUploadUrl);
+    }
+
+    function openContributionUploadPage() {
+      const targetUrl = getContributionUploadPageUrl();
+      if (!targetUrl) {
+        return;
+      }
+      helpers.openExternalUrl?.(targetUrl);
     }
 
     async function syncContributionProfile(partial = {}) {
@@ -360,6 +372,11 @@
           return;
         }
         actionInFlight = true;
+        try {
+          openContributionUploadPage();
+        } catch (error) {
+          helpers.showToast?.(`打开上传页面失败：${error.message}`, 'error');
+        }
         render();
         try {
           await enterContributionMode();
@@ -415,7 +432,7 @@
 
       dom.btnOpenContributionUpload?.addEventListener('click', () => {
         try {
-          helpers.openExternalUrl?.(contributionUploadUrl);
+          openContributionUploadPage();
         } catch (error) {
           helpers.showToast?.(`打开上传页面失败：${error.message}`, 'error');
         }
