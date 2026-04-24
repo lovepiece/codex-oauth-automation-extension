@@ -32,13 +32,14 @@ const MAIL2925_AGREEMENT_PATTERNS = [];
 const document = {
   querySelectorAll(selector) {
     if (selector === '.mail-item') return [];
-    if (selector === 'body *') return [headerEmail];
-    if (selector.includes('[class*="user"]')) return [headerEmail];
+    if (selector === 'body *') return [headerEmail, wrongHeader];
+    if (selector === '.right-header' || selector.includes('right-header')) return [headerEmail];
+    if (selector.includes('[class*="user"]')) return [];
     return [];
   },
   body: {
-    innerText: 'QLHazycoder qlhazycoder@2925.com',
-    textContent: 'QLHazycoder qlhazycoder@2925.com',
+    innerText: 'QLHazycoder qlhazycoder@2925.com tm1.openai.com@foo.example',
+    textContent: 'QLHazycoder qlhazycoder@2925.com tm1.openai.com@foo.example',
   },
 };
 const window = {
@@ -52,6 +53,13 @@ const headerEmail = {
   textContent: 'qlhazycoder@2925.com',
   innerText: 'qlhazycoder@2925.com',
   getBoundingClientRect() { return { top: 40, left: 400, width: 120, height: 20 }; },
+  closest() { return null; },
+};
+const wrongHeader = {
+  hidden: false,
+  textContent: 'tm1.openai.com@foo.example',
+  innerText: 'tm1.openai.com@foo.example',
+  getBoundingClientRect() { return { top: 48, left: 430, width: 150, height: 20 }; },
   closest() { return null; },
 };
 function detectMail2925LimitMessage() { return ''; }

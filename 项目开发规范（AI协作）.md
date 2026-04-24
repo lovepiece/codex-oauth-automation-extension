@@ -82,6 +82,14 @@
 5. 是否需要成功收尾逻辑
 6. 是否需要 README 与完整链路文档更新
 
+补充约定：
+
+- 如果新增来源本身已经提供稳定的后台协议接口，可以直接走协议分支接入：
+  - 步骤 7 通过 `background/panel-bridge.js` 生成 `auth_url`
+  - 步骤 10 通过 `background/steps/platform-verify.js` 直接提交 localhost callback
+- 这类来源优先复用现有 OpenAI 授权页与 localhost callback 主链，不要为了“看起来统一”再额外新增一套页面 DOM 自动点击内容脚本。
+- 只有当目标来源没有可用协议接口、必须依赖后台页面按钮时，才新增对应的 panel content script。
+
 ### 3.2.1 共享别名邮箱逻辑补充
 
 当 Gmail / 2925 这类“既影响注册邮箱生成，又影响 sidepanel 表单行为”的 provider 发生变化时，必须优先检查是否应落入共享层，而不是继续把规则分散写在：
@@ -119,7 +127,7 @@
 当前约定示例：
 
 - `contributionMode` 是 sidepanel 的运行态 UI 模式，不是新的 `panelMode`
-- `panelMode` 仍然只允许 `cpa | sub2api`
+- `panelMode` 当前允许 `cpa | sub2api | codex2api`
 - 运行态模式不能混进 `PERSISTED_SETTING_DEFAULTS`
 - 运行态模式不能混进配置导入/导出
 - 如果运行态模式会临时覆盖某些持久配置的显示值，必须同时处理好“退出模式后恢复”和“自动保存不能误覆盖原配置”这两个问题

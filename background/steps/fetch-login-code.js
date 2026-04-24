@@ -9,6 +9,7 @@
       chrome,
       CLOUDFLARE_TEMP_EMAIL_PROVIDER,
       confirmCustomVerificationStepBypass,
+      ensureMail2925MailboxSession,
       ensureStep8VerificationPageReady,
       getOAuthFlowRemainingMs,
       getOAuthFlowStepTimeoutMs,
@@ -55,6 +56,20 @@
 
     function normalizeStep8VerificationTargetEmail(value) {
       return String(value || '').trim().toLowerCase();
+    }
+
+    function getExpectedMail2925MailboxEmail(state = {}) {
+      if (Boolean(state?.mail2925UseAccountPool)) {
+        const currentAccountId = String(state?.currentMail2925AccountId || '').trim();
+        const accounts = Array.isArray(state?.mail2925Accounts) ? state.mail2925Accounts : [];
+        const currentAccount = accounts.find((account) => String(account?.id || '') === currentAccountId) || null;
+        const accountEmail = String(currentAccount?.email || '').trim().toLowerCase();
+        if (accountEmail) {
+          return accountEmail;
+        }
+      }
+
+      return String(state?.mail2925BaseEmail || '').trim().toLowerCase();
     }
 
     async function focusOrOpenMailTab(mail) {
@@ -134,7 +149,17 @@
         await addLog(`步骤 8：正在通过 ${mail.label} 轮询验证码...`);
       } else {
         await addLog(`步骤 8：正在打开${mail.label}...`);
-        await focusOrOpenMailTab(mail);
+        if (mail.provider === '2925' && typeof ensureMail2925MailboxSession === 'function') {
+          await ensureMail2925MailboxSession({
+            accountId: state.currentMail2925AccountId || null,
+            forceRelogin: false,
+            allowLoginWhenOnLoginPage: Boolean(state?.mail2925UseAccountPool),
+            expectedMailboxEmail: getExpectedMail2925MailboxEmail(state),
+            actionLabel: 'Step 8: ensure 2925 mailbox session',
+          });
+        } else {
+          await focusOrOpenMailTab(mail);
+        }
         if (mail.provider === '2925') {
           await addLog(`步骤 8：将直接使用当前已登录的 ${mail.label} 轮询验证码。`, 'info');
         }
@@ -173,6 +198,16 @@
         } catch (err) {
           if (!isVerificationMailPollingError(err) && !isStep8RestartStep7Error(err)) {
             throw err;
+          }
+
+          // If step 9 (phone-verify) has already been initiated, the flow has moved past step 8.
+          // Re-running step 7 would be wrong — the error is from a stale/closed tab or wrong page state.
+          const stateForCheck = await getState();
+          const step9Status = stateForCheck?.stepStatuses?.[9];
+          if (step9Status && step9Status !== 'pending') {
+            throw new Error(
+              `步骤 8：流程已推进至步骤 9（${step9Status}），不再回退至步骤 7 重试。原因：${err.message}`
+            );
           }
 
           lastMailPollingError = err;

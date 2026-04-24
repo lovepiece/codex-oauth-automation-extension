@@ -8,11 +8,13 @@ test('background mail2925 session uses /login/ as relogin entry url', () => {
   assert.match(source, /const MAIL2925_LOGIN_URL = 'https:\/\/2925\.com\/login\/';/);
 });
 
-test('background mail2925 session keeps login message timeout above the 40-second mailbox wait', () => {
+test('background mail2925 session keeps a long login response timeout and a separate page-recovery window', () => {
   const source = fs.readFileSync('background/mail-2925-session.js', 'utf8');
-  assert.match(source, /timeoutMs:\s*50000,/);
-  assert.match(source, /responseTimeoutMs:\s*50000,/);
-  assert.match(source, /40 秒内未进入收件箱/);
+  assert.match(source, /const MAIL2925_LOGIN_MESSAGE_RETRY_WINDOW_MS = 15000;/);
+  assert.match(source, /const MAIL2925_LOGIN_RESPONSE_TIMEOUT_MS = 120000;/);
+  assert.match(source, /const MAIL2925_LOGIN_PAGE_RECOVERY_TIMEOUT_MS = 120000;/);
+  assert.match(source, /responseTimeoutMs:\s*MAIL2925_LOGIN_RESPONSE_TIMEOUT_MS,/);
+  assert.match(source, /recoverMail2925LoginPageAfterTransportError/);
 });
 
 test('ensureMail2925MailboxSession waits 3 seconds before and after opening login page on force relogin', async () => {

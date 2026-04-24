@@ -534,6 +534,9 @@ function detectMail2925ViewState() {
 
 function getMail2925DisplayedMailboxEmail() {
   const directSelectors = [
+    '.right-header',
+    '[class~="right-header"]',
+    '[class*="right-header"]',
     '[class*="user"] [class*="mail"]',
     '[class*="user"] [class*="email"]',
     '[class*="account"] [class*="mail"]',
@@ -548,7 +551,8 @@ function getMail2925DisplayedMailboxEmail() {
       if (!isVisibleNode(candidate) || isMailItemNode(candidate)) {
         continue;
       }
-      const email = extractEmails(candidate.textContent || candidate.innerText || '')[0] || '';
+      const email = extractEmails(candidate.textContent || candidate.innerText || '')
+        .find((value) => /@2925\.com$/i.test(String(value || '').trim())) || '';
       if (email) {
         return email;
       }
@@ -567,7 +571,8 @@ function getMail2925DisplayedMailboxEmail() {
       return rect.top >= 0 && rect.top <= Math.max(window.innerHeight * 0.35, 280);
     })
     .map((node) => {
-      const email = extractEmails(node.textContent || node.innerText || '')[0] || '';
+      const email = extractEmails(node.textContent || node.innerText || '')
+        .find((value) => /@2925\.com$/i.test(String(value || '').trim())) || '';
       return { node, email };
     })
     .filter((entry) => entry.email);

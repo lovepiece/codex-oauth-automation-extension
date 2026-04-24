@@ -147,7 +147,7 @@ return {
 
 test('signup entry diagnostics captures hidden signup button style and blocking ancestor details', () => {
 const api = new Function(`
-const SIGNUP_ENTRY_TRIGGER_PATTERN = /鍏嶈垂娉ㄥ唽|绔嬪嵆娉ㄥ唽|娉ㄥ唽|sign\\s*up|register|create\\s*account|create\\s+account/i;
+const SIGNUP_ENTRY_TRIGGER_PATTERN = /免费注册|立即注册|注册|sign\\s*up|register|create\\s*account|create\\s+account/i;
 const location = { href: 'https://chatgpt.com/' };
 const hiddenSection = {
   tagName: 'DIV',

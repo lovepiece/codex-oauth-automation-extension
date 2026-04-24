@@ -3,8 +3,9 @@
 importScripts(
   'managed-alias-utils.js',
   'mail2925-utils.js',
+  'hero-sms-core.js',
+  'background/hero-sms.js',
   'background/account-run-history.js',
-  'background/contribution-oauth.js',
   'background/mail-2925-session.js',
   'background/panel-bridge.js',
   'background/generated-email-helpers.js',
@@ -25,6 +26,7 @@ importScripts(
   'background/steps/clear-login-cookies.js',
   'background/steps/oauth-login.js',
   'background/steps/fetch-login-code.js',
+  'background/steps/phone-verify.js',
   'background/steps/confirm-oauth.js',
   'background/steps/platform-verify.js',
   'data/names.js',
@@ -41,7 +43,7 @@ const STEP_IDS = SHARED_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
-const LAST_STEP_ID = STEP_IDS[STEP_IDS.length - 1] || 10;
+const LAST_STEP_ID = STEP_IDS[STEP_IDS.length - 1] || 11;
 const FINAL_OAUTH_CHAIN_START_STEP = 7;
 
 const {
@@ -156,6 +158,7 @@ const OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000;
 const SUB2API_STEP1_RESPONSE_TIMEOUT_MS = 90000;
 const SUB2API_STEP9_RESPONSE_TIMEOUT_MS = 120000;
 const DEFAULT_SUB2API_URL = 'https://sub2api.hisence.fun/admin/accounts';
+const DEFAULT_CODEX2API_URL = 'http://localhost:8080/admin/accounts';
 const DEFAULT_SUB2API_GROUP_NAME = 'codex';
 const DEFAULT_SUB2API_PROXY_NAME = '';
 const DEFAULT_SUB2API_REDIRECT_URI = 'http://localhost:1455/auth/callback';
@@ -184,31 +187,27 @@ const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
 const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL = DEFAULT_HOTMAIL_LOCAL_BASE_URL;
 const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
+const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
+const HERO_SMS_NUMBER_MAX_USES = 5;
+const HERO_SMS_ACTIVATION_TTL_MS = 20 * 60 * 1000;
+const HERO_SMS_STANDBY_RETRY_DELAY_MS = 5 * 60 * 1000;
+const HERO_SMS_SMS_POLL_INTERVAL_MS = 5000;
+const HERO_SMS_SMS_TIMEOUT_MS = 180000;
+const HERO_SMS_RESEND_AFTER_MS = 60000;
+const HERO_SMS_SERVICE_ALIASES = {
+  openai: 'dr',
+  chatgpt: 'dr',
+  claude: 'acz',
+};
+const HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT = 3;
+const HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS = 2 * 60 * 1000;
+const HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX = 'hero-sms-failed-cleanup:';
+let heroSmsCountryCatalogPromise = null;
 const DEFAULT_LUCKMAIL_PROJECT_CODE = 'openai';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 const PERSISTENT_ALIAS_STATE_KEYS = ['manualAliasUsage', 'preservedAliases'];
 const ACCOUNT_RUN_HISTORY_STORAGE_KEY = 'accountRunHistory';
-const CONTRIBUTION_RUNTIME_DEFAULTS = self.MultiPageBackgroundContributionOAuth?.RUNTIME_DEFAULTS || {
-  contributionMode: false,
-  contributionModeExpected: false,
-  contributionNickname: '',
-  contributionQq: '',
-  contributionSessionId: '',
-  contributionAuthUrl: '',
-  contributionAuthState: '',
-  contributionCallbackUrl: '',
-  contributionStatus: '',
-  contributionStatusMessage: '',
-  contributionLastPollAt: 0,
-  contributionCallbackStatus: 'idle',
-  contributionCallbackMessage: '',
-  contributionAuthOpenedAt: 0,
-  contributionAuthTabId: 0,
-};
-const CONTRIBUTION_RUNTIME_KEYS = self.MultiPageBackgroundContributionOAuth?.RUNTIME_KEYS
-  || Object.keys(CONTRIBUTION_RUNTIME_DEFAULTS);
-
 initializeSessionStorageAccess();
 setupDeclarativeNetRequestRules();
 
@@ -252,6 +251,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   sub2apiPassword: '',
   sub2apiGroupName: DEFAULT_SUB2API_GROUP_NAME,
   sub2apiDefaultProxyName: DEFAULT_SUB2API_PROXY_NAME,
+  codex2apiUrl: DEFAULT_CODEX2API_URL,
+  codex2apiAdminKey: '',
   customPassword: '',
   autoRunSkipFailures: false,
   autoRunFallbackThreadIntervalMinutes: 0,
@@ -276,12 +277,17 @@ const PERSISTED_SETTING_DEFAULTS = {
   hotmailServiceMode: HOTMAIL_SERVICE_MODE_LOCAL,
   hotmailRemoteBaseUrl: DEFAULT_HOTMAIL_REMOTE_BASE_URL,
   hotmailLocalBaseUrl: DEFAULT_HOTMAIL_LOCAL_BASE_URL,
+  heroSmsBaseUrl: DEFAULT_HERO_SMS_BASE_URL,
+  heroSmsApiKey: '',
+  heroSmsService: '',
+  heroSmsCountry: '',
   cloudflareDomain: '',
   cloudflareDomains: [],
   cloudflareTempEmailBaseUrl: '',
   cloudflareTempEmailAdminAuth: '',
   cloudflareTempEmailCustomAuth: '',
   cloudflareTempEmailReceiveMailbox: '',
+  cloudflareTempEmailUseRandomSubdomain: false,
   cloudflareTempEmailDomain: '',
   cloudflareTempEmailDomains: [],
   hotmailAccounts: [],
@@ -291,7 +297,7 @@ const PERSISTED_SETTING_DEFAULTS = {
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
 const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
-const STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS = 25000;
+const STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS = 10000;
 const PRE_LOGIN_COOKIE_CLEAR_DOMAINS = [
   'chatgpt.com',
   'chat.openai.com',
@@ -312,7 +318,6 @@ const PRE_LOGIN_COOKIE_CLEAR_ORIGINS = [
 const DEFAULT_STATE = {
   currentStep: 0, // 当前流程执行到的步骤编号。
   stepStatuses: Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending'])),
-  ...CONTRIBUTION_RUNTIME_DEFAULTS,
   oauthUrl: null, // 运行时抓取到的 OAuth 地址，不要手动预填。
   email: null, // 运行时邮箱，由程序自动获取并写入，不能手动预填。
   password: null, // 运行时实际密码，由 customPassword 或程序自动生成后写入。
@@ -329,6 +334,8 @@ const DEFAULT_STATE = {
   sub2apiGroupId: null, // SUB2API 目标分组 ID。
   sub2apiDraftName: null, // SUB2API 本轮预生成的账号名称。
   sub2apiProxyId: null, // SUB2API 本轮使用的代理 ID。
+  codex2apiSessionId: null, // Codex2API OAuth 会话 ID。
+  codex2apiOAuthState: null, // Codex2API OAuth state。
   flowStartTime: null, // 当前流程开始时间。
   tabRegistry: {}, // 程序维护的标签页注册表。
   sourceLastUrls: {}, // 各来源页面最近一次打开的地址记录。
@@ -343,6 +350,14 @@ const DEFAULT_STATE = {
   luckmailPreserveTagName: DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME,
   currentLuckmailPurchase: null,
   currentLuckmailMailCursor: null,
+  currentHeroSmsActivation: null,
+  heroSmsLastCode: '',
+  heroSmsRuntimeStatus: '',
+  heroSmsActiveActivations: [],
+  heroSmsActiveActivationsFetchedAt: 0,
+  heroSmsFailedActivations: [],
+  heroSmsStandbyActivations: [],
+  heroSmsPendingSuccessActivationId: 0,
   autoRunning: false, // 当前是否处于自动运行中。
   autoRunPhase: 'idle', // 当前自动运行阶段。
   autoRunCurrentRun: 0, // 自动运行当前执行到第几轮。
@@ -653,7 +668,14 @@ function normalizeEmailGenerator(value = '') {
 }
 
 function normalizePanelMode(value = '') {
-  return String(value || '').trim().toLowerCase() === 'sub2api' ? 'sub2api' : 'cpa';
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'sub2api') {
+    return 'sub2api';
+  }
+  if (normalized === 'codex2api') {
+    return 'codex2api';
+  }
+  return 'cpa';
 }
 
 function normalizeMailProvider(value = '') {
@@ -829,8 +851,652 @@ function getCloudflareTempEmailConfig(state = {}) {
     adminAuth: String(state.cloudflareTempEmailAdminAuth || ''),
     customAuth: String(state.cloudflareTempEmailCustomAuth || ''),
     receiveMailbox: normalizeCloudflareTempEmailReceiveMailbox(state.cloudflareTempEmailReceiveMailbox),
+    useRandomSubdomain: Boolean(state.cloudflareTempEmailUseRandomSubdomain),
     domain: normalizeCloudflareTempEmailDomain(state.cloudflareTempEmailDomain),
     domains: normalizeCloudflareTempEmailDomains(state.cloudflareTempEmailDomains),
+  };
+}
+
+function normalizeHeroSmsBaseUrl(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HERO_SMS_BASE_URL;
+
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    parsed.search = '';
+    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return DEFAULT_HERO_SMS_BASE_URL;
+  }
+}
+
+function normalizeHeroSmsService(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return HERO_SMS_SERVICE_ALIASES[normalized] || normalized;
+}
+
+function normalizeHeroSmsCountry(value = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) return '';
+  if (!/^\d+$/.test(rawValue)) return '';
+  return String(Math.max(0, Number(rawValue)));
+}
+
+function normalizeHeroSmsCountryCatalogEntry(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const id = normalizeHeroSmsCountry(value.id);
+  if (!id) {
+    return null;
+  }
+
+  const eng = String(value.eng || '').trim();
+  const chn = String(value.chn || '').trim();
+  const rus = String(value.rus || '').trim();
+  const names = [];
+  const seen = new Set();
+  for (const item of [chn, eng, rus]) {
+    const normalized = String(item || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(normalized);
+  }
+
+  return {
+    id,
+    eng,
+    chn,
+    rus,
+    names,
+  };
+}
+
+async function loadHeroSmsCountryCatalog() {
+  if (!heroSmsCountryCatalogPromise) {
+    heroSmsCountryCatalogPromise = (async () => {
+      const response = await fetch(chrome.runtime.getURL('data/SMS-Country.json'));
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      if (!Array.isArray(payload)) {
+        throw new Error('SMS-Country.json 格式无效。');
+      }
+
+      return payload
+        .map((entry) => normalizeHeroSmsCountryCatalogEntry(entry))
+        .filter(Boolean);
+    })().catch((err) => {
+      heroSmsCountryCatalogPromise = null;
+      throw err;
+    });
+  }
+
+  return heroSmsCountryCatalogPromise;
+}
+
+async function getHeroSmsCountrySelection(countryValue = '') {
+  const countryId = normalizeHeroSmsCountry(countryValue);
+  if (!countryId) {
+    return null;
+  }
+
+  try {
+    const catalog = await loadHeroSmsCountryCatalog();
+    const match = catalog.find((entry) => entry.id === countryId);
+    if (!match) {
+      return null;
+    }
+
+    return {
+      id: match.id,
+      name: match.chn || match.eng || match.rus || '',
+      eng: match.eng,
+      chn: match.chn,
+      rus: match.rus,
+      names: Array.isArray(match.names) ? [...match.names] : [],
+    };
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to load HeroSMS country catalog:', err?.message || err);
+    return null;
+  }
+}
+
+function normalizeHeroSmsActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const acquiredAt = Number(value.acquiredAt) || Date.now();
+  const expiresAt = Number(value.expiresAt) || (acquiredAt + HERO_SMS_ACTIVATION_TTL_MS);
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service),
+    country: normalizeHeroSmsCountry(value.country),
+    acquiredAt,
+    expiresAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    lastCode: String(value.lastCode || '').trim(),
+    lastStatus: String(value.lastStatus || '').trim(),
+    lastStatusAt: Number(value.lastStatusAt) || 0,
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+    releasedAt: Number(value.releasedAt) || 0,
+    releaseReason: String(value.releaseReason || '').trim(),
+  };
+}
+
+function normalizeHeroSmsFailedActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const failedAt = Number(value.failedAt) || Date.now();
+  const cleanupAt = Number(value.cleanupAt) || (failedAt + HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS);
+
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service),
+    country: normalizeHeroSmsCountry(value.country),
+    baseUrl: normalizeHeroSmsBaseUrl(value.baseUrl),
+    apiKey: String(value.apiKey || '').trim(),
+    acquiredAt: Number(value.acquiredAt) || 0,
+    expiresAt: Number(value.expiresAt) || 0,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+    failedAt,
+    cleanupAt,
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'scheduled').trim() || 'scheduled',
+    cleanupResponse: String(value.cleanupResponse || '').trim(),
+    cleanupError: String(value.cleanupError || '').trim(),
+    cleanupAttemptedAt: Number(value.cleanupAttemptedAt) || 0,
+    cleanupCompletedAt: Number(value.cleanupCompletedAt) || 0,
+  };
+}
+
+function normalizeHeroSmsStandbyActivation(value = null) {
+  const normalizedActivation = normalizeHeroSmsActivation(value);
+  if (!normalizedActivation) {
+    return null;
+  }
+
+  const standbyAt = Number(value.standbyAt) || Date.now();
+  const retryAt = Number(value.retryAt) || (standbyAt + HERO_SMS_STANDBY_RETRY_DELAY_MS);
+
+  return {
+    ...normalizedActivation,
+    standbyAt,
+    retryAt,
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'waiting_retry').trim() || 'waiting_retry',
+    retryCount: Math.max(0, Math.floor(Number(value.retryCount) || 0)),
+    lastSelectedAt: Number(value.lastSelectedAt) || 0,
+  };
+}
+
+function normalizeHeroSmsActiveActivation(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(
+    value.activationId
+    ?? value.activation_id
+    ?? value.id
+    ?? value.orderId
+    ?? value.order_id
+  );
+  if (!Number.isInteger(activationId) || activationId <= 0) {
+    return null;
+  }
+
+  const phoneNumber = String(
+    value.phoneNumber
+    ?? value.phone_number
+    ?? value.number
+    ?? value.phone
+    ?? value.msisdn
+    ?? ''
+  ).trim();
+  const acquiredAt = Number(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? value.issuedAt
+    ?? value.issued_at
+    ?? 0
+  ) || Date.parse(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? value.issuedAt
+    ?? value.issued_at
+    ?? ''
+  ) || 0;
+  const expiresAt = Number(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? 0
+  ) || Date.parse(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? ''
+  ) || 0;
+
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsService(value.service ?? value.serviceCode ?? value.service_code ?? ''),
+    country: normalizeHeroSmsCountry(value.country ?? value.countryCode ?? value.country_code ?? value.countryId ?? value.country_id ?? ''),
+    status: String(value.status ?? value.state ?? value.activationStatus ?? '').trim(),
+    acquiredAt,
+    expiresAt,
+    smsCode: String(value.smsCode ?? value.code ?? '').trim(),
+    smsText: String(value.smsText ?? value.text ?? '').trim(),
+    cost: String(value.activationCost ?? value.cost ?? '').trim(),
+    raw: value,
+  };
+}
+
+function normalizeHeroSmsFailedActivationList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = value
+    .map((item) => normalizeHeroSmsFailedActivation(item))
+    .filter(Boolean)
+    .sort((left, right) => (right.failedAt || 0) - (left.failedAt || 0));
+
+  return normalized.slice(0, 30);
+}
+
+function resolveLegacyAutoStepDelaySeconds(input = {}) {
+  const hasLegacyMin = input.autoStepRandomDelayMinSeconds !== undefined;
+  const hasLegacyMax = input.autoStepRandomDelayMaxSeconds !== undefined;
+  if (!hasLegacyMin && !hasLegacyMax) {
+    return undefined;
+  }
+
+  const minSeconds = normalizeAutoStepDelaySeconds(input.autoStepRandomDelayMinSeconds, null);
+  const maxSeconds = normalizeAutoStepDelaySeconds(input.autoStepRandomDelayMaxSeconds, null);
+  if (minSeconds === null && maxSeconds === null) {
+    return null;
+  }
+  if (minSeconds === null) {
+    return maxSeconds;
+  }
+  if (maxSeconds === null) {
+    return minSeconds;
+  }
+  return Math.round((minSeconds + maxSeconds) / 2);
+}
+
+function normalizeRunCount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+  return Math.min(50, Math.max(1, Math.floor(numeric)));
+}
+
+function normalizeAutoRunTimerKind(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === AUTO_RUN_TIMER_KIND_SCHEDULED_START) {
+    return AUTO_RUN_TIMER_KIND_SCHEDULED_START;
+  }
+  if (normalized === AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS) {
+    return AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS;
+  }
+  if (normalized === AUTO_RUN_TIMER_KIND_BEFORE_RETRY) {
+    return AUTO_RUN_TIMER_KIND_BEFORE_RETRY;
+  }
+  return '';
+}
+
+function normalizeAutoRunTimerPlan(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    return null;
+  }
+
+  const kind = normalizeAutoRunTimerKind(plan.kind);
+  if (!kind) {
+    return null;
+  }
+
+  const fireAt = Number(plan.fireAt);
+  if (!Number.isFinite(fireAt)) {
+    return null;
+  }
+
+  const totalRuns = normalizeRunCount(plan.totalRuns);
+  const autoRunSkipFailures = Boolean(plan.autoRunSkipFailures);
+  const autoRetryMode = normalizeAutoRetryMode(plan.autoRetryMode);
+  const mode = plan.mode === 'continue' ? 'continue' : 'restart';
+  const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
+  const attemptRun = Math.max(
+    0,
+    Math.min(AUTO_RUN_MAX_RETRIES_PER_ROUND + 1, Math.floor(Number(plan.attemptRun) || 0))
+  );
+  const roundSummaries = serializeAutoRunRoundSummaries(totalRuns, plan.roundSummaries);
+  const countdownTitle = String(plan.countdownTitle || '').trim();
+  const countdownNote = String(plan.countdownNote || '').trim();
+
+  if (kind === AUTO_RUN_TIMER_KIND_SCHEDULED_START) {
+    return {
+      kind,
+      fireAt,
+      totalRuns,
+      autoRunSkipFailures,
+      autoRetryMode,
+      mode,
+      currentRun: 0,
+      attemptRun: 0,
+      roundSummaries: [],
+      countdownTitle: countdownTitle || '已计划自动运行',
+      countdownNote: countdownNote || `计划于 ${formatAutoRunScheduleTime(fireAt)} 开始`,
+    };
+  }
+
+  if (kind === AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS) {
+    const normalizedCurrentRun = Math.max(1, Math.min(totalRuns, currentRun));
+    const normalizedAttemptRun = Math.max(1, attemptRun);
+    return {
+      kind,
+      fireAt,
+      totalRuns,
+      autoRunSkipFailures,
+      autoRetryMode,
+      mode: 'restart',
+      currentRun: normalizedCurrentRun,
+      attemptRun: normalizedAttemptRun,
+      roundSummaries,
+      countdownTitle: countdownTitle || '线程间隔中',
+      countdownNote: countdownNote || `第 ${Math.min(normalizedCurrentRun + 1, totalRuns)}/${totalRuns} 轮即将开始`,
+    };
+  }
+
+  const normalizedCurrentRun = Math.max(1, Math.min(totalRuns, currentRun));
+  const normalizedAttemptRun = Math.max(1, attemptRun);
+  return {
+    kind,
+    fireAt,
+    totalRuns,
+    autoRunSkipFailures,
+    autoRetryMode,
+    mode: 'restart',
+    currentRun: normalizedCurrentRun,
+    attemptRun: normalizedAttemptRun,
+    roundSummaries,
+    countdownTitle: countdownTitle || '线程间隔中',
+    countdownNote: countdownNote || `第 ${normalizedCurrentRun}/${totalRuns} 轮第 ${normalizedAttemptRun} 次尝试即将开始`,
+  };
+}
+
+function normalizeAutoRunTimerPlanFromState(state = {}) {
+  const directPlan = normalizeAutoRunTimerPlan(state.autoRunTimerPlan);
+  if (directPlan) {
+    return directPlan;
+  }
+
+  if (state.autoRunPhase !== 'scheduled') {
+    return null;
+  }
+
+  const legacyScheduledAt = Number(state.scheduledAutoRunAt);
+  if (!Number.isFinite(legacyScheduledAt)) {
+    return null;
+  }
+
+  return normalizeAutoRunTimerPlan({
+    kind: AUTO_RUN_TIMER_KIND_SCHEDULED_START,
+    fireAt: legacyScheduledAt,
+    totalRuns: state.scheduledAutoRunPlan?.totalRuns ?? state.autoRunTotalRuns,
+    autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
+    autoRetryMode: state.scheduledAutoRunPlan?.autoRetryMode ?? state.autoRetryMode,
+    mode: state.scheduledAutoRunPlan?.mode,
+  });
+}
+
+function getAutoRunTimerPlanPhase(kind = '') {
+  return kind === AUTO_RUN_TIMER_KIND_SCHEDULED_START ? 'scheduled' : 'waiting_interval';
+}
+
+function getAutoRunTimerStatusPayload(plan) {
+  const normalizedPlan = normalizeAutoRunTimerPlan(plan);
+  if (!normalizedPlan) {
+    return null;
+  }
+
+  const phase = getAutoRunTimerPlanPhase(normalizedPlan.kind);
+  return {
+    phase,
+    currentRun: normalizedPlan.currentRun,
+    totalRuns: normalizedPlan.totalRuns,
+    attemptRun: normalizedPlan.attemptRun,
+    scheduledAt: phase === 'scheduled' ? normalizedPlan.fireAt : null,
+    countdownAt: normalizedPlan.fireAt,
+    countdownTitle: normalizedPlan.countdownTitle,
+    countdownNote: normalizedPlan.countdownNote,
+  };
+}
+
+function normalizeEmailGenerator(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'custom' || normalized === 'manual') {
+    return 'custom';
+  }
+  if (normalized === 'icloud') {
+    return 'icloud';
+  }
+  if (normalized === 'cloudflare') return 'cloudflare';
+  if (normalized === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return CLOUDFLARE_TEMP_EMAIL_GENERATOR;
+  return 'duck';
+}
+
+function normalizePanelMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'sub2api' ? 'sub2api' : 'cpa';
+}
+
+function normalizeMailProvider(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'custom':
+    case ICLOUD_PROVIDER:
+    case GMAIL_PROVIDER:
+    case HOTMAIL_PROVIDER:
+    case LUCKMAIL_PROVIDER:
+    case CLOUDFLARE_TEMP_EMAIL_PROVIDER:
+    case '163':
+    case '163-vip':
+    case 'qq':
+    case 'inbucket':
+    case '2925':
+      return normalized;
+    default:
+      return PERSISTED_SETTING_DEFAULTS.mailProvider;
+  }
+}
+
+function normalizeCloudflareTempEmailSubdomainLabel(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 63);
+}
+
+function buildLuckmailSessionSettingsPayload(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const payload = {};
+
+  if (input.luckmailApiKey !== undefined) {
+    payload.luckmailApiKey = String(input.luckmailApiKey || '');
+  }
+  if (input.luckmailBaseUrl !== undefined) {
+    payload.luckmailBaseUrl = normalizeLuckmailBaseUrl(input.luckmailBaseUrl);
+  }
+  if (input.luckmailEmailType !== undefined) {
+    payload.luckmailEmailType = normalizeLuckmailEmailType(input.luckmailEmailType);
+  }
+  if (input.luckmailDomain !== undefined) {
+    payload.luckmailDomain = String(input.luckmailDomain || '').trim();
+  }
+  if (input.luckmailUsedPurchases !== undefined) {
+    payload.luckmailUsedPurchases = normalizeLuckmailUsedPurchases(input.luckmailUsedPurchases);
+  }
+  if (input.luckmailPreserveTagId !== undefined) {
+    payload.luckmailPreserveTagId = Number(input.luckmailPreserveTagId) || 0;
+  }
+  if (input.luckmailPreserveTagName !== undefined) {
+    payload.luckmailPreserveTagName = String(input.luckmailPreserveTagName || '').trim() || DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME;
+  }
+  if (input.currentLuckmailPurchase !== undefined) {
+    payload.currentLuckmailPurchase = input.currentLuckmailPurchase
+      ? normalizeLuckmailPurchase(input.currentLuckmailPurchase)
+      : null;
+  }
+  if (input.currentLuckmailMailCursor !== undefined) {
+    payload.currentLuckmailMailCursor = input.currentLuckmailMailCursor
+      ? normalizeLuckmailMailCursor(input.currentLuckmailMailCursor)
+      : null;
+  }
+
+  return payload;
+}
+
+function normalizeMail2925Mode(value = '') {
+  return String(value || '').trim().toLowerCase() === MAIL_2925_MODE_RECEIVE
+    ? MAIL_2925_MODE_RECEIVE
+    : DEFAULT_MAIL_2925_MODE;
+}
+
+function normalizeLocalCpaStep9Mode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'bypass'
+    ? 'bypass'
+    : DEFAULT_LOCAL_CPA_STEP9_MODE;
+}
+
+function normalizeCpaCallbackMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'step6'
+    ? 'step6'
+    : DEFAULT_CPA_CALLBACK_MODE;
+}
+
+function normalizeCloudflareDomain(rawValue = '') {
+  let value = String(rawValue || '').trim().toLowerCase();
+  if (!value) return '';
+  value = value.replace(/^@+/, '');
+  value = value.replace(/^https?:\/\//, '');
+  value = value.replace(/\/.*$/, '');
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(value)) return '';
+  return value;
+}
+
+function normalizeCloudflareDomains(values) {
+  const normalizedDomains = [];
+  const seen = new Set();
+
+  for (const value of Array.isArray(values) ? values : []) {
+    const normalized = normalizeCloudflareDomain(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    normalizedDomains.push(normalized);
+  }
+
+  return normalizedDomains;
+}
+
+function normalizeHotmailRemoteBaseUrl(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HOTMAIL_REMOTE_BASE_URL;
+
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return DEFAULT_HOTMAIL_REMOTE_BASE_URL;
+    }
+
+    if (parsed.pathname.endsWith('/api/mail-new') || parsed.pathname.endsWith('/api/mail-all') || parsed.pathname === '/api.html') {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return DEFAULT_HOTMAIL_REMOTE_BASE_URL;
+  }
+}
+
+function normalizeHotmailLocalBaseUrl(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HOTMAIL_LOCAL_BASE_URL;
+
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return DEFAULT_HOTMAIL_LOCAL_BASE_URL;
+    }
+
+    if (['/messages', '/code', '/clear', '/token'].includes(parsed.pathname)) {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return DEFAULT_HOTMAIL_LOCAL_BASE_URL;
+  }
+}
+
+function getHotmailServiceSettings(state = {}) {
+  return {
+    mode: normalizeHotmailServiceMode(state.hotmailServiceMode),
+    remoteBaseUrl: normalizeHotmailRemoteBaseUrl(state.hotmailRemoteBaseUrl),
+    localBaseUrl: normalizeHotmailLocalBaseUrl(state.hotmailLocalBaseUrl),
   };
 }
 
@@ -838,6 +1504,669 @@ function normalizeCloudflareTempEmailReceiveMailbox(value = '') {
   const normalized = normalizeCloudflareTempEmailAddress(value);
   if (!normalized) return '';
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : '';
+}
+
+async function setHeroSmsCurrentActivationState(activation) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  await setState({ currentHeroSmsActivation: normalizedActivation });
+  broadcastDataUpdate({ currentHeroSmsActivation: normalizedActivation });
+  return normalizedActivation;
+}
+
+async function setHeroSmsRuntimeStatusState(status = '') {
+  const normalizedStatus = String(status || '').trim();
+  await setState({ heroSmsRuntimeStatus: normalizedStatus });
+  broadcastDataUpdate({ heroSmsRuntimeStatus: normalizedStatus });
+  return normalizedStatus;
+}
+
+function getHeroSmsActiveActivations(state = {}) {
+  return normalizeHeroSmsActiveActivationList(state.heroSmsActiveActivations);
+}
+
+async function setHeroSmsActiveActivationsState(list = [], fetchedAt = Date.now()) {
+  const normalizedList = normalizeHeroSmsActiveActivationList(list);
+  const normalizedFetchedAt = Number(fetchedAt) || 0;
+  await setState({
+    heroSmsActiveActivations: normalizedList,
+    heroSmsActiveActivationsFetchedAt: normalizedFetchedAt,
+  });
+  broadcastDataUpdate({
+    heroSmsActiveActivations: normalizedList,
+    heroSmsActiveActivationsFetchedAt: normalizedFetchedAt,
+  });
+  return normalizedList;
+}
+
+function getHeroSmsFailedActivations(state = {}) {
+  return normalizeHeroSmsFailedActivationList(state.heroSmsFailedActivations);
+}
+
+async function setHeroSmsFailedActivationsState(list = []) {
+  const normalizedList = normalizeHeroSmsFailedActivationList(list);
+  await setState({ heroSmsFailedActivations: normalizedList });
+  broadcastDataUpdate({ heroSmsFailedActivations: normalizedList });
+  return normalizedList;
+}
+
+async function upsertHeroSmsFailedActivationState(entry) {
+  const normalizedEntry = normalizeHeroSmsFailedActivation(entry);
+  if (!normalizedEntry) {
+    return getHeroSmsFailedActivations(await getState());
+  }
+
+  const state = await getState();
+  const currentList = getHeroSmsFailedActivations(state);
+  const existingIndex = currentList.findIndex((item) => item.activationId === normalizedEntry.activationId);
+  if (existingIndex >= 0) {
+    currentList[existingIndex] = {
+      ...currentList[existingIndex],
+      ...normalizedEntry,
+    };
+  } else {
+    currentList.unshift(normalizedEntry);
+  }
+  return setHeroSmsFailedActivationsState(currentList);
+}
+
+function getHeroSmsStandbyActivations(state = {}) {
+  return normalizeHeroSmsStandbyActivationList(state.heroSmsStandbyActivations);
+}
+
+async function setHeroSmsStandbyActivationsState(list = []) {
+  const normalizedList = normalizeHeroSmsStandbyActivationList(list);
+  await setState({ heroSmsStandbyActivations: normalizedList });
+  broadcastDataUpdate({ heroSmsStandbyActivations: normalizedList });
+  return normalizedList;
+}
+
+async function upsertHeroSmsStandbyActivationState(entry) {
+  const normalizedEntry = normalizeHeroSmsStandbyActivation(entry);
+  if (!normalizedEntry) {
+    return getHeroSmsStandbyActivations(await getState());
+  }
+
+  const state = await getState();
+  const currentList = getHeroSmsStandbyActivations(state);
+  const existingIndex = currentList.findIndex((item) => item.activationId === normalizedEntry.activationId);
+  if (existingIndex >= 0) {
+    currentList[existingIndex] = {
+      ...currentList[existingIndex],
+      ...normalizedEntry,
+    };
+  } else {
+    currentList.unshift(normalizedEntry);
+  }
+  return setHeroSmsStandbyActivationsState(currentList);
+}
+
+async function removeHeroSmsStandbyActivationState(activationId) {
+  const normalizedId = Number(activationId);
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    return getHeroSmsStandbyActivations(await getState());
+  }
+
+  const state = await getState();
+  const nextList = getHeroSmsStandbyActivations(state).filter((item) => item.activationId !== normalizedId);
+  return setHeroSmsStandbyActivationsState(nextList);
+}
+
+async function mergeHeroSmsCurrentActivationState(patch = {}) {
+  const state = await getState();
+  const currentActivation = getCurrentHeroSmsActivation(state);
+  if (!currentActivation) {
+    return null;
+  }
+
+  return setHeroSmsCurrentActivationState({
+    ...currentActivation,
+    ...(patch || {}),
+  });
+}
+
+async function setHeroSmsLastCodeState(code = '') {
+  const normalizedCode = String(code || '').trim();
+  await setState({ heroSmsLastCode: normalizedCode });
+  broadcastDataUpdate({ heroSmsLastCode: normalizedCode });
+  return normalizedCode;
+}
+
+function ensureHeroSmsConfig(config) {
+  if (!config.baseUrl) {
+    throw new Error('HeroSMS API 地址为空或格式无效。');
+  }
+  if (!config.apiKey) {
+    throw new Error('HeroSMS API Key 为空。');
+  }
+  if (!config.service) {
+    throw new Error('HeroSMS 服务代码为空。');
+  }
+  if (!config.country) {
+    throw new Error('HeroSMS 国家代码为空。');
+  }
+  return config;
+}
+
+function ensureHeroSmsApiConfig(config) {
+  if (!config.baseUrl) {
+    throw new Error('HeroSMS API 地址为空或格式无效。');
+  }
+  if (!config.apiKey) {
+    throw new Error('HeroSMS API Key 为空。');
+  }
+  return config;
+}
+
+async function requestHeroSmsText(config, action, params = {}) {
+  ensureHeroSmsApiConfig(config);
+  const url = new URL(config.baseUrl);
+  url.searchParams.set('action', action);
+  url.searchParams.set('api_key', config.apiKey);
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === '') continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'text/plain, application/json;q=0.9, */*;q=0.8',
+      },
+    });
+  } catch (err) {
+    throw new Error(`HeroSMS 请求失败：${err.message}`);
+  }
+
+  const text = (await response.text()).trim();
+  if (!response.ok) {
+    throw new Error(`HeroSMS 请求失败：${text || `HTTP ${response.status}`}`);
+  }
+  if (!text) {
+    throw new Error(`HeroSMS ${action} 返回为空。`);
+  }
+  return text;
+}
+
+async function requestHeroSmsPayload(config, action, params = {}) {
+  const text = await requestHeroSmsText(config, action, params);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function parseHeroSmsNumberResponse(text = '') {
+  const parts = String(text || '').split(':');
+  if (parts.length >= 3 && parts[0] === 'ACCESS_NUMBER') {
+    return {
+      activationId: Number(parts[1]),
+      phoneNumber: parts.slice(2).join(':').trim(),
+    };
+  }
+  if (/UNPROCESSABLE_ENTITY:service:INVALID/i.test(text)) {
+    throw new Error(
+      'HeroSMS 服务代码无效（service:INVALID）。请在侧边栏填写真实的 service code，而不是服务名称。'
+      + ' 可先运行 `python scripts/herosms_demo.py services --api-key 你的Key` 查看可用服务代码。'
+      + ` 原始响应：${text}`
+    );
+  }
+  if (/UNPROCESSABLE_ENTITY:country:INVALID/i.test(text)) {
+    throw new Error(
+      'HeroSMS 国家代码无效（country:INVALID）。请填写 HeroSMS 文档里的数字国家代码。'
+      + ' 可先运行 `python scripts/herosms_demo.py countries --api-key 你的Key` 查看国家列表。'
+      + ` 原始响应：${text}`
+    );
+  }
+  throw new Error(`HeroSMS getNumber 返回异常：${text}`);
+}
+
+function extractHeroSmsErrorText(payload) {
+  if (typeof payload === 'string') {
+    return payload.trim();
+  }
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  return String(
+    payload.error
+    || payload.message
+    || payload.msg
+    || payload.description
+    || payload.detail
+    || payload.status_text
+    || ''
+  ).trim();
+}
+
+function parseHeroSmsNumberV2Response(payload) {
+  if (typeof payload === 'string') {
+    return parseHeroSmsNumberResponse(payload);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`HeroSMS getNumberV2 返回异常：${JSON.stringify(payload)}`);
+  }
+
+  const status = String(payload.status || payload.result || '').trim().toLowerCase();
+  if (status && status !== 'success' && status !== 'ok') {
+    const errorText = extractHeroSmsErrorText(payload) || JSON.stringify(payload);
+    if (/service:invalid/i.test(errorText)) {
+      throw new Error(
+        'HeroSMS 服务代码无效（service:INVALID）。OpenAI 在当前 herosms.txt 中对应的服务编号是 `dr`。'
+        + ` 原始响应：${errorText}`
+      );
+    }
+    if (/country:invalid/i.test(errorText)) {
+      throw new Error(`HeroSMS 国家代码无效（country:INVALID）。原始响应：${errorText}`);
+    }
+    throw new Error(`HeroSMS getNumberV2 返回异常：${errorText}`);
+  }
+
+  const container = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const activationId = Number(
+    container.activationId
+    ?? container.activation_id
+    ?? container.id
+    ?? container.orderId
+    ?? payload.activationId
+    ?? payload.activation_id
+    ?? payload.id
+  );
+  const phoneNumber = String(
+    container.phoneNumber
+    ?? container.phone_number
+    ?? container.number
+    ?? container.phone
+    ?? container.msisdn
+    ?? payload.phoneNumber
+    ?? payload.phone_number
+    ?? payload.number
+    ?? payload.phone
+    ?? ''
+  ).trim();
+
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    throw new Error(`HeroSMS getNumberV2 返回缺少号码或激活 ID：${JSON.stringify(payload)}`);
+  }
+
+  return {
+    activationId,
+    phoneNumber,
+  };
+}
+
+function parseHeroSmsStatusResponse(text = '') {
+  const [status, code = ''] = String(text || '').split(':', 2);
+  return {
+    status: String(status || '').trim(),
+    code: String(code || '').trim(),
+    raw: String(text || '').trim(),
+  };
+}
+
+function parseHeroSmsActiveActivationsResponse(payload) {
+  if (typeof payload === 'string') {
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${payload}`);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${JSON.stringify(payload)}`);
+  }
+
+  const status = String(payload.status || payload.result || '').trim().toLowerCase();
+  if (status && status !== 'success' && status !== 'ok') {
+    const errorText = extractHeroSmsErrorText(payload) || JSON.stringify(payload);
+    throw new Error(`HeroSMS getActiveActivations 返回异常：${errorText}`);
+  }
+
+  const activeContainer = payload.activeActivations && typeof payload.activeActivations === 'object'
+    ? payload.activeActivations
+    : {};
+  const rowPayload = [];
+  if (Array.isArray(activeContainer.rows)) {
+    rowPayload.push(...activeContainer.rows);
+  }
+  if (Array.isArray(activeContainer.row)) {
+    rowPayload.push(...activeContainer.row);
+  } else if (activeContainer.row && typeof activeContainer.row === 'object') {
+    rowPayload.push(activeContainer.row);
+  }
+  const combined = [
+    ...(Array.isArray(payload.data) ? payload.data : []),
+    ...rowPayload,
+  ];
+
+  return normalizeHeroSmsActiveActivationList(combined);
+}
+
+function isHeroSmsDeliveredStatus(status = '') {
+  const normalized = String(status || '').trim().toUpperCase();
+  return normalized === 'STATUS_OK'
+    || normalized === 'STATUS_WAIT_RETRY'
+    || normalized === 'STATUS_WAIT_RESEND';
+}
+
+function isHeroSmsActivationCanceledStatus(status = '') {
+  return String(status || '').trim().toUpperCase() === 'STATUS_CANCEL';
+}
+
+function extractHeroSmsDeliveredCode(status) {
+  const parsed = status && typeof status === 'object'
+    ? status
+    : parseHeroSmsStatusResponse(status);
+  if (!isHeroSmsDeliveredStatus(parsed?.status)) {
+    return '';
+  }
+
+  const codeText = String(parsed?.code || '').trim();
+  if (!codeText) {
+    return '';
+  }
+
+  const match = codeText.match(/\d{4,8}/);
+  return match ? match[0] : '';
+}
+
+async function heroSmsGetNumber(config, options = {}) {
+  ensureHeroSmsConfig(config);
+  const payload = await requestHeroSmsPayload(config, 'getNumberV2', {
+    service: config.service,
+    country: config.country,
+    operator: options.operator,
+    maxPrice: options.maxPrice,
+    fixedPrice: options.fixedPrice,
+    ref: options.ref,
+    phoneException: options.phoneException,
+  });
+  return parseHeroSmsNumberV2Response(payload);
+}
+
+async function heroSmsGetActiveActivations(config) {
+  ensureHeroSmsApiConfig(config);
+  const payload = await requestHeroSmsPayload(config, 'getActiveActivations', {});
+  return parseHeroSmsActiveActivationsResponse(payload);
+}
+
+async function heroSmsGetStatus(config, activationId) {
+  const text = await requestHeroSmsText(config, 'getStatus', { id: activationId });
+  return parseHeroSmsStatusResponse(text);
+}
+
+async function heroSmsSetStatus(config, activationId, status) {
+  return requestHeroSmsText(config, 'setStatus', { id: activationId, status });
+}
+
+async function heroSmsFinishActivation(config, activationId) {
+  return requestHeroSmsText(config, 'finishActivation', { id: activationId });
+}
+
+async function heroSmsCancelActivation(config, activationId) {
+  return requestHeroSmsText(config, 'cancelActivation', { id: activationId });
+}
+
+function validateHeroSmsSetStatusResponse(statusCode, responseText = '') {
+  const normalizedStatusCode = Number(statusCode);
+  const response = String(responseText || '').trim();
+  const successPattern = normalizedStatusCode === 1
+    ? /^ACCESS_READY\b/i
+    : normalizedStatusCode === 3
+      ? /^ACCESS_RETRY_GET\b/i
+      : normalizedStatusCode === 6
+        ? /^ACCESS_ACTIVATION\b/i
+        : normalizedStatusCode === 8
+          ? /^ACCESS_CANCEL\b/i
+          : null;
+
+  if (successPattern && successPattern.test(response)) {
+    return response;
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(response);
+  } catch {
+    payload = null;
+  }
+
+  const errorText = extractHeroSmsErrorText(payload || response) || response || `status=${normalizedStatusCode}`;
+  throw new Error(`HeroSMS setStatus(${normalizedStatusCode}) 返回异常：${errorText}`);
+}
+
+async function heroSmsSetActivationReady(config, activationId) {
+  const response = await heroSmsSetStatus(config, activationId, 1);
+  return validateHeroSmsSetStatusResponse(1, response);
+}
+
+async function heroSmsRequestNextSms(config, activationId) {
+  const response = await heroSmsSetStatus(config, activationId, 3);
+  return validateHeroSmsSetStatusResponse(3, response);
+}
+
+async function heroSmsReleaseActivation(config, activationId, mode = 'cancel') {
+  const normalizedMode = String(mode || '').trim().toLowerCase() === 'complete' ? 'complete' : 'cancel';
+  const statusCode = normalizedMode === 'complete' ? 6 : 8;
+
+  try {
+    const response = await heroSmsSetStatus(config, activationId, statusCode);
+    return validateHeroSmsSetStatusResponse(statusCode, response);
+  } catch (err) {
+    if (normalizedMode === 'complete') {
+      return heroSmsFinishActivation(config, activationId);
+    }
+
+    try {
+      return await heroSmsCancelActivation(config, activationId);
+    } catch {
+      throw err;
+    }
+  }
+}
+
+async function attemptHeroSmsActivationRelease(activation, options = {}) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) {
+    return {
+      ok: false,
+      released: false,
+      mode: 'cancel',
+      releaseResponse: '',
+      error: new Error('缺少可释放的 HeroSMS 激活记录。'),
+    };
+  }
+
+  const state = options.state && typeof options.state === 'object'
+    ? options.state
+    : await getState();
+  const config = getHeroSmsConfig(state);
+  const releaseMode = options.preferComplete || normalizedActivation.useCount >= HERO_SMS_NUMBER_MAX_USES
+    ? 'complete'
+    : 'cancel';
+
+  try {
+    const releaseResponse = await heroSmsReleaseActivation(config, normalizedActivation.activationId, releaseMode);
+    return {
+      ok: true,
+      released: true,
+      mode: releaseMode,
+      releaseResponse,
+      activation: normalizedActivation,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      released: false,
+      mode: releaseMode,
+      releaseResponse: '',
+      activation: normalizedActivation,
+      error,
+    };
+  }
+}
+
+function isHeroSmsActivationReusable(state, activation) {
+  const normalizedActivation = normalizeHeroSmsActivation(activation);
+  if (!normalizedActivation) return false;
+  const config = getHeroSmsConfig(state);
+  return normalizedActivation.service === config.service
+    && normalizedActivation.country === config.country
+    && normalizedActivation.useCount < HERO_SMS_NUMBER_MAX_USES
+    && getHeroSmsActivationRemainingMs(normalizedActivation) > 0
+    && !isHeroSmsActivationCanceledStatus(normalizedActivation.lastStatus)
+    && !normalizedActivation.releasedAt;
+}
+
+function isHeroSmsStandbyActivationReusable(state, activation, now = Date.now()) {
+  const normalizedActivation = normalizeHeroSmsStandbyActivation(activation);
+  if (!normalizedActivation) return false;
+  const config = getHeroSmsConfig(state);
+  return normalizedActivation.service === config.service
+    && normalizedActivation.country === config.country
+    && normalizedActivation.useCount < HERO_SMS_NUMBER_MAX_USES
+    && getHeroSmsActivationRemainingMs(normalizedActivation, now) > 0
+    && normalizedActivation.retryAt <= now
+    && !isHeroSmsActivationCanceledStatus(normalizedActivation.lastStatus)
+    && !normalizedActivation.releasedAt;
+}
+
+async function cleanupExpiredHeroSmsStandbyActivations(state) {
+  const currentState = state || await getState();
+  const now = Date.now();
+  const standbyList = getHeroSmsStandbyActivations(currentState);
+  const nextList = [];
+  let changed = false;
+
+  for (const item of standbyList) {
+    const shouldRelease = getHeroSmsActivationRemainingMs(item, now) <= 0 || item.useCount >= HERO_SMS_NUMBER_MAX_USES;
+    if (!shouldRelease) {
+      nextList.push(item);
+      continue;
+    }
+
+    changed = true;
+    const releaseResult = await attemptHeroSmsActivationRelease(item, {
+      state: currentState,
+      preferComplete: item.useCount >= HERO_SMS_NUMBER_MAX_USES,
+    });
+    if (releaseResult.released) {
+      await addLog(
+        `HeroSMS：备用列表号码 ${item.phoneNumber} 已因${item.useCount >= HERO_SMS_NUMBER_MAX_USES ? '达到 Max 上限' : '有效期结束'}自动${releaseResult.mode === 'complete' ? '完成' : '释放'}。`,
+        'warn'
+      );
+      continue;
+    }
+
+    nextList.push(normalizeHeroSmsStandbyActivation({
+      ...item,
+      status: 'release_failed',
+      errorText: String(releaseResult.error?.message || item.errorText || '').trim(),
+    }));
+    await addLog(`HeroSMS：备用列表号码 ${item.phoneNumber} 自动释放失败，将保留记录稍后重试：${releaseResult.error?.message || '未知错误'}`, 'warn');
+  }
+
+  if (!changed) {
+    return standbyList;
+  }
+  await setHeroSmsStandbyActivationsState(nextList);
+  return nextList;
+}
+
+async function takeReusableHeroSmsStandbyActivation(state) {
+  const currentState = state || await getState();
+  const standbyList = await cleanupExpiredHeroSmsStandbyActivations(currentState);
+  const now = Date.now();
+  const candidate = standbyList
+    .filter((item) => isHeroSmsStandbyActivationReusable(currentState, item, now))
+    .sort((left, right) => (left.retryAt || 0) - (right.retryAt || 0))[0];
+  if (!candidate) {
+    return null;
+  }
+
+  await removeHeroSmsStandbyActivationState(candidate.activationId);
+  const activation = await setHeroSmsCurrentActivationState({
+    ...candidate,
+    lastSelectedAt: now,
+  });
+  await setHeroSmsRuntimeStatusState(`已从备用列表恢复号码 ${activation.phoneNumber}`);
+  await addLog(`HeroSMS：已从备用列表恢复手机号 ${activation.phoneNumber}（ID ${activation.activationId}）。`, 'warn');
+  return activation;
+}
+
+async function syncHeroSmsActiveActivations(state, options = {}) {
+  const currentState = state || await getState();
+  const config = ensureHeroSmsApiConfig({
+    baseUrl: normalizeHeroSmsBaseUrl(currentState.heroSmsBaseUrl),
+    apiKey: String(currentState.heroSmsApiKey || '').trim(),
+  });
+  const activeList = await heroSmsGetActiveActivations(config);
+  return setHeroSmsActiveActivationsState(activeList, options.fetchedAt || Date.now());
+}
+
+function pickReusableHeroSmsRemoteActiveActivation(state = {}, activeList = [], options = {}) {
+  const config = getHeroSmsConfig(state);
+  const failedIds = new Set(getHeroSmsFailedActivations(state).map((item) => item.activationId));
+  const standbyIds = new Set(getHeroSmsStandbyActivations(state).map((item) => item.activationId));
+  const explicitExcludedIds = new Set(
+    (Array.isArray(options.excludeActivationIds) ? options.excludeActivationIds : [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item > 0)
+  );
+  const candidates = normalizeHeroSmsActiveActivationList(activeList).filter((item) => {
+    if (!item.phoneNumber) return false;
+    if (failedIds.has(item.activationId) || standbyIds.has(item.activationId) || explicitExcludedIds.has(item.activationId)) {
+      return false;
+    }
+    if (item.service && item.service !== config.service) {
+      return false;
+    }
+    if (item.country && item.country !== config.country) {
+      return false;
+    }
+    return !isHeroSmsActivationCanceledStatus(item.status);
+  });
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const strictMatches = candidates.filter((item) => item.service === config.service && item.country === config.country);
+  if (strictMatches.length > 0) {
+    return strictMatches.sort((left, right) => {
+      const leftScore = left.acquiredAt || left.activationId || 0;
+      const rightScore = right.acquiredAt || right.activationId || 0;
+      return rightScore - leftScore;
+    })[0];
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+async function takeReusableHeroSmsRemoteActiveActivation(state, options = {}) {
+  const currentState = state || await getState();
+  const config = getHeroSmsConfig(currentState);
+  const fetchedAt = options.fetchedAt || Date.now();
+  const activeList = Array.isArray(options.activeList)
+    ? await setHeroSmsActiveActivationsState(options.activeList, fetchedAt)
+    : await syncHeroSmsActiveActivations(currentState, { fetchedAt });
+  const candidate = pickReusableHeroSmsRemoteActiveActivation(currentState, activeList, options);
+  if (!candidate) {
+    return null;
+  }
+
+  const activation = await setHeroSmsCurrentActivationState({
+    activationId: candidate.activationId,
+    phoneNumber: candidate.phoneNumber,
+    service: candidate.service || config.service,
+    country: candidate.country || config.country,
+    acquiredAt: candidate.acquiredAt || Date.now(),
+    expiresAt: candidate.expiresAt || ((candidate.acquiredAt || Date.now()) + HERO_SMS_ACTIVATION_TTL_MS),
+    lastStatus: candidate.status,
+  });
+  await setHeroSmsRuntimeStatusState(`已从 HeroSMS 活跃列表恢复号码 ${activation.phoneNumber}`);
+  await addLog(`HeroSMS：已从活跃号码列表恢复手机号 ${activation.phoneNumber}（ID ${activation.activationId}）。`, 'warn');
+  return activation;
 }
 
 function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {}, config = getCloudflareTempEmailConfig(state)) {
@@ -874,6 +2203,10 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '').trim();
     case 'sub2apiDefaultProxyName':
       return String(value || '').trim();
+    case 'codex2apiUrl':
+      return normalizeCodex2ApiUrl(value);
+    case 'codex2apiAdminKey':
+      return String(value || '').trim();
     case 'customPassword':
       return String(value || '');
     case 'autoRunSkipFailures':
@@ -897,6 +2230,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeEmailGenerator(value);
     case 'autoDeleteUsedIcloudAlias':
     case 'accountRunHistoryTextEnabled':
+    case 'cloudflareTempEmailUseRandomSubdomain':
       return Boolean(value);
     case 'icloudHostPreference':
       return normalizeIcloudHost(value) || 'auto';
@@ -1161,67 +2495,6 @@ async function setPasswordState(password) {
   broadcastDataUpdate({ password });
 }
 
-function buildContributionModeState(enabled, persistedSettings = {}, currentState = {}) {
-  const currentContributionState = {};
-  for (const key of CONTRIBUTION_RUNTIME_KEYS) {
-    currentContributionState[key] = currentState[key] !== undefined
-      ? currentState[key]
-      : CONTRIBUTION_RUNTIME_DEFAULTS[key];
-  }
-
-  if (enabled) {
-    return {
-      ...currentContributionState,
-      contributionMode: true,
-      contributionModeExpected: true,
-      panelMode: 'cpa',
-      customPassword: '',
-      accountRunHistoryTextEnabled: false,
-    };
-  }
-
-  return {
-    ...CONTRIBUTION_RUNTIME_DEFAULTS,
-    contributionMode: false,
-    contributionModeExpected: false,
-    panelMode: persistedSettings.panelMode || DEFAULT_STATE.panelMode,
-    customPassword: persistedSettings.customPassword || '',
-    accountRunHistoryTextEnabled: Boolean(persistedSettings.accountRunHistoryTextEnabled),
-  };
-}
-
-async function setContributionMode(enabled) {
-  const normalizedEnabled = Boolean(enabled);
-  const [persistedSettings, currentState] = await Promise.all([
-    getPersistedSettings(),
-    getState(),
-  ]);
-
-  if (normalizedEnabled) {
-    await setPersistentSettings({ panelMode: 'cpa' });
-  }
-
-  const updates = buildContributionModeState(normalizedEnabled, {
-    ...persistedSettings,
-    ...(normalizedEnabled ? { panelMode: 'cpa' } : {}),
-  }, currentState);
-
-  await setState(updates);
-  const nextState = await getState();
-  const contributionBroadcast = {};
-  for (const key of CONTRIBUTION_RUNTIME_KEYS) {
-    contributionBroadcast[key] = nextState[key];
-  }
-  broadcastDataUpdate({
-    ...contributionBroadcast,
-    panelMode: nextState.panelMode,
-    customPassword: nextState.customPassword,
-    accountRunHistoryTextEnabled: nextState.accountRunHistoryTextEnabled,
-    accountRunHistoryHelperBaseUrl: nextState.accountRunHistoryHelperBaseUrl,
-  });
-  return nextState;
-}
-
 function getLuckmailUsedPurchases(state = {}) {
   return normalizeLuckmailUsedPurchases(state?.luckmailUsedPurchases);
 }
@@ -1372,21 +2645,15 @@ async function resetState() {
       'luckmailPreserveTagId',
       'luckmailPreserveTagName',
       'preferredIcloudHost',
-      ...CONTRIBUTION_RUNTIME_KEYS,
     ]),
     getPersistedSettings(),
     getPersistedAliasState(),
   ]);
-  const contributionModeState = buildContributionModeState(Boolean(prev.contributionMode), {
-    ...persistedSettings,
-    ...(prev.contributionMode ? { panelMode: 'cpa' } : {}),
-  }, prev);
   await chrome.storage.session.clear();
   await chrome.storage.session.set({
     ...DEFAULT_STATE,
     ...persistedSettings,
     ...persistedAliasState,
-    ...contributionModeState,
     seenCodes: prev.seenCodes || [],
     seenInbucketMailIds: prev.seenInbucketMailIds || [],
     accounts: prev.accounts || [],
@@ -3623,11 +4890,31 @@ function normalizeSub2ApiUrl(rawUrl) {
   return parsed.toString();
 }
 
+function normalizeCodex2ApiUrl(rawUrl) {
+  if (typeof navigationUtils !== 'undefined' && navigationUtils?.normalizeCodex2ApiUrl) {
+    return navigationUtils.normalizeCodex2ApiUrl(rawUrl);
+  }
+  const input = (rawUrl || '').trim() || DEFAULT_CODEX2API_URL;
+  const withProtocol = /^https?:\/\//i.test(input) ? input : `http://${input}`;
+  const parsed = new URL(withProtocol);
+  if (!parsed.pathname || parsed.pathname === '/' || parsed.pathname === '/admin') {
+    parsed.pathname = '/admin/accounts';
+  }
+  parsed.hash = '';
+  return parsed.toString();
+}
+
 function getPanelMode(state = {}) {
   if (typeof navigationUtils !== 'undefined' && navigationUtils?.getPanelMode) {
     return navigationUtils.getPanelMode(state);
   }
-  return state.panelMode === 'sub2api' ? 'sub2api' : 'cpa';
+  if (state.panelMode === 'sub2api') {
+    return 'sub2api';
+  }
+  if (state.panelMode === 'codex2api') {
+    return 'codex2api';
+  }
+  return 'cpa';
 }
 
 function getPanelModeLabel(modeOrState) {
@@ -3635,7 +4922,13 @@ function getPanelModeLabel(modeOrState) {
     return navigationUtils.getPanelModeLabel(modeOrState);
   }
   const mode = typeof modeOrState === 'string' ? modeOrState : getPanelMode(modeOrState);
-  return mode === 'sub2api' ? 'SUB2API' : 'CPA';
+  if (mode === 'sub2api') {
+    return 'SUB2API';
+  }
+  if (mode === 'codex2api') {
+    return 'Codex2API';
+  }
+  return 'CPA';
 }
 
 function isSignupPageHost(hostname = '') {
@@ -3939,6 +5232,7 @@ function isRetryableContentScriptTransportError(error) {
 }
 
 const navigationUtils = self.MultiPageBackgroundNavigationUtils?.createNavigationUtils({
+  DEFAULT_CODEX2API_URL,
   DEFAULT_SUB2API_URL,
   normalizeLocalCpaStep9Mode,
 });
@@ -4132,6 +5426,8 @@ function getDownstreamStateResets(step) {
       sub2apiOAuthState: null,
       sub2apiGroupId: null,
       sub2apiDraftName: null,
+      codex2apiSessionId: null,
+      codex2apiOAuthState: null,
       flowStartTime: null,
       password: null,
       lastEmailTimestamp: null,
@@ -4893,6 +6189,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleMessage(message, sender) {
+  if (heroSmsManager) {
+    const heroSmsResult = await heroSmsManager.handleRuntimeMessage(message);
+    if (heroSmsResult !== null) {
+      return heroSmsResult;
+    }
+  }
   return messageRouter.handleMessage(message, sender);
 }
 
@@ -4917,6 +6219,8 @@ async function handleStepData(step, payload) {
       if (payload.sub2apiGroupId !== undefined) updates.sub2apiGroupId = payload.sub2apiGroupId || null;
       if (payload.sub2apiDraftName !== undefined) updates.sub2apiDraftName = payload.sub2apiDraftName || null;
       if (payload.sub2apiProxyId !== undefined) updates.sub2apiProxyId = payload.sub2apiProxyId || null;
+      if (payload.codex2apiSessionId !== undefined) updates.codex2apiSessionId = payload.codex2apiSessionId || null;
+      if (payload.codex2apiOAuthState !== undefined) updates.codex2apiOAuthState = payload.codex2apiOAuthState || null;
       if (Object.keys(updates).length) {
         await setState(updates);
       }
@@ -4959,10 +6263,10 @@ async function handleStepData(step, payload) {
         loginVerificationRequestedAt: null,
       });
       break;
-    case 9:
+    case 10:
       if (payload.localhostUrl) {
         if (!isLocalhostOAuthCallbackUrl(payload.localhostUrl)) {
-          throw new Error('步骤 9 返回了无效的 localhost OAuth 回调地址。');
+          throw new Error('步骤 10 返回了无效的 localhost OAuth 回调地址。');
         }
         await setState({
           localhostUrl: payload.localhostUrl,
@@ -4970,12 +6274,10 @@ async function handleStepData(step, payload) {
           oauthFlowDeadlineSourceUrl: null,
         });
         broadcastDataUpdate({ localhostUrl: payload.localhostUrl });
-      }
-      break;
-    case 10: {
-      if (payload.localhostUrl) {
         await closeLocalhostCallbackTabs(payload.localhostUrl);
       }
+      break;
+    case 11: {
       const latestState = await getState();
       if (latestState.currentHotmailAccountId && isHotmailProvider(latestState)) {
         await patchHotmailAccount(latestState.currentHotmailAccountId, {
@@ -5017,8 +6319,8 @@ async function handleStepData(step, payload) {
 const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
-const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([1, 2, 4, 6, 7, 8, 9]);
-const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 10]);
+const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([1, 2, 4, 6, 7, 8, 9, 10]);
+const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 11]);
 
 function waitForStepComplete(step, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -5070,6 +6372,9 @@ async function completeStepFromBackground(step, payload = {}) {
   await handleStepData(step, payload);
   if (step === LAST_STEP_ID) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
+    if (heroSmsManager) {
+      await heroSmsManager.finalizeAfterSuccessfulFlow().catch(() => {});
+    }
   }
   notifyStepComplete(step, payload);
 }
@@ -5165,7 +6470,7 @@ async function waitForRunningStepsToFinish(payload = {}) {
   return currentState;
 }
 
-const AUTH_CHAIN_STEP_IDS = new Set([7, 8, 9, 10]);
+const AUTH_CHAIN_STEP_IDS = new Set([7, 8, 9, 10, 11]);
 let activeTopLevelAuthChainExecution = null;
 
 function isAuthChainStep(step) {
@@ -5448,6 +6753,7 @@ const mail2925SessionManager = self.MultiPageBackgroundMail2925Session?.createMa
   sleepWithStop,
   throwIfStopped,
   upsertMail2925AccountInList,
+  waitForTabComplete,
   waitForTabUrlMatch,
 });
 
@@ -5598,15 +6904,6 @@ const accountRunHistoryHelpers = self.MultiPageBackgroundAccountRunHistory?.crea
   getState,
   normalizeAccountRunHistoryHelperBaseUrl,
 });
-const contributionOAuthManager = self.MultiPageBackgroundContributionOAuth?.createContributionOAuthManager({
-  addLog,
-  broadcastDataUpdate,
-  chrome,
-  closeLocalhostCallbackTabs,
-  getState,
-  setState,
-});
-contributionOAuthManager?.ensureCallbackListeners?.();
 
 async function broadcastAccountRunHistoryUpdate() {
   if (!accountRunHistoryHelpers?.getPersistedAccountRunHistory) {
@@ -6177,13 +7474,14 @@ async function resumeAutoRun() {
 // ============================================================
 
 const SIGNUP_ENTRY_URL = 'https://chatgpt.com/';
-const SIGNUP_PAGE_INJECT_FILES = ['content/utils.js', 'content/auth-page-recovery.js', 'content/signup-page.js'];
+const SIGNUP_PAGE_INJECT_FILES = ['content/activation-utils.js', 'content/utils.js', 'content/auth-page-recovery.js', 'content/signup-page.js'];
 const panelBridge = self.MultiPageBackgroundPanelBridge?.createPanelBridge({
   chrome,
   addLog,
   closeConflictingTabsForSource,
   ensureContentScriptReadyOnTab,
   getPanelMode,
+  normalizeCodex2ApiUrl,
   normalizeSub2ApiUrl,
   rememberSourceLastUrl,
   sendToContentScript,
@@ -6322,6 +7620,18 @@ const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
   STEP6_MAX_ATTEMPTS,
   throwIfStopped,
 });
+const heroSmsManager = self.MultiPageBackgroundHeroSms?.createHeroSmsManager({
+  addLog,
+  broadcastDataUpdate,
+  chrome,
+  ensureContentScriptReadyOnTab,
+  getState,
+  sendTabMessageWithTimeout,
+  setState,
+  SIGNUP_PAGE_INJECT_FILES,
+  sleepWithStop,
+  throwIfStopped,
+});
 const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   addLog,
   chrome,
@@ -6349,7 +7659,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS,
   throwIfStopped,
 });
-const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
+const step11Executor = self.MultiPageBackgroundStep11?.createStep11Executor({
   addLog,
   chrome,
   closeConflictingTabsForSource,
@@ -6359,6 +7669,7 @@ const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   getTabId,
   isLocalhostOAuthCallbackUrl,
   isTabAlive,
+  normalizeCodex2ApiUrl,
   normalizeSub2ApiUrl,
   rememberSourceLastUrl,
   reuseOrCreateTab,
@@ -6377,8 +7688,9 @@ const stepExecutorsByKey = {
   'clear-login-cookies': () => step6Executor.executeStep6(),
   'oauth-login': (state) => step7Executor.executeStep7(state),
   'fetch-login-code': (state) => step8Executor.executeStep8(state),
-  'confirm-oauth': (state) => step9Executor.executeStep9(state),
-  'platform-verify': (state) => executeStep10(state),
+  'phone-verify': (state) => step9Executor.executeStep9(state),
+  'confirm-oauth': (state) => step10Executor.executeStep10(state),
+  'platform-verify': (state) => executeStep11(state),
 };
 const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter({
   addLog,
@@ -6425,6 +7737,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   getPendingAutoRunTimerPlan,
   getSourceLabel,
   getState,
+  getTabId,
   getStopRequested: () => stopRequested,
   handleCloudflareSecurityBlocked,
   handleAutoRunLoopUnhandledError,
@@ -6436,6 +7749,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   isLocalhostOAuthCallbackUrl,
   isLuckmailProvider,
   isStopError,
+  isTabAlive,
   launchAutoRunTimerPlan,
   listIcloudAliases,
   listLuckmailPurchasesForManagement,
@@ -6456,7 +7770,6 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   selectLuckmailPurchase,
   setCurrentHotmailAccount,
   setCurrentMail2925Account,
-  setContributionMode,
   setEmailState,
   setEmailStateSilently,
   setIcloudAliasPreservedState,
@@ -6469,9 +7782,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setStepStatus,
   skipAutoRunCountdown,
   skipStep,
-  startContributionFlow: (...args) => contributionOAuthManager?.startContributionFlow?.(...args),
   startAutoRunLoop,
-  pollContributionStatus: (...args) => contributionOAuthManager?.pollContributionStatus?.(...args),
   syncHotmailAccounts,
   deleteMail2925Account,
   deleteMail2925Accounts,
@@ -6806,24 +8117,7 @@ async function runPreStep6CookieCleanup() {
 // ============================================================
 
 async function refreshOAuthUrlBeforeStep6(state) {
-  if (state?.contributionModeExpected && !state?.contributionMode) {
-    throw new Error('步骤 7：当前自动流程预期使用贡献模式，但运行态 contributionMode 已丢失，已阻止回退到普通 CPA / SUB2API 链路。请重新进入贡献模式后再点击自动。');
-  }
-  if (state?.contributionMode && contributionOAuthManager?.startContributionFlow) {
-    await addLog('步骤 7：contributionMode=true，走公开贡献接口，正在申请 OAuth 登录地址...', 'info');
-    const contributionState = await contributionOAuthManager.startContributionFlow({
-      nickname: state.contributionNickname || '',
-      openAuthTab: false,
-      stateOverride: state,
-    });
-    const oauthUrl = String(contributionState?.contributionAuthUrl || '').trim();
-    if (!oauthUrl) {
-      throw new Error('贡献模式未返回可用的登录地址，请稍后重试。');
-    }
-    await handleStepData(1, { oauthUrl });
-    return oauthUrl;
-  }
-  await addLog(`步骤 7：contributionMode=false，走普通 CPA / SUB2API 链路（当前面板：${getPanelModeLabel(state)}），正在刷新 OAuth 登录地址...`, 'info');
+  await addLog(`步骤 7：正在刷新 OAuth 登录地址（当前面板：${getPanelModeLabel(state)}）...`, 'info');
   console.log(LOG_PREFIX, '[refreshOAuthUrlBeforeStep6] requesting fresh OAuth directly from panel');
   const refreshResult = await requestOAuthUrlFromPanel(state, { logLabel: '步骤 7' });
   await handleStepData(1, refreshResult);
@@ -7204,7 +8498,7 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS)
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
     }
     if (pageState?.addPhonePage) {
-      throw new Error('步骤 9：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
+      return pageState;
     }
     if (pageState?.retryPage) {
       throw new Error(`步骤 9：当前认证页已进入重试页，当前流程将直接报错。URL: ${pageState.url || 'unknown'}`);
@@ -7419,6 +8713,21 @@ function getStep8EffectLabel(effect) {
 
 const step9Executor = self.MultiPageBackgroundStep9?.createStep9Executor({
   addLog,
+  completeStepFromBackground,
+  ensureStep8SignupPageReady,
+  getOAuthFlowStepTimeoutMs,
+  getStep8PageState,
+  getTabId,
+  handlePhonePageDuringStep8: heroSmsManager?.handlePhonePageDuringStep8?.bind(heroSmsManager),
+  isTabAlive,
+  sleepWithStop,
+  throwIfStopped,
+  CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX,
+  CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE,
+});
+
+const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
+  addLog,
   chrome,
   cleanupStep8NavigationListeners,
   clickWithDebugger,
@@ -7456,80 +8765,19 @@ async function executeStep9(state) {
 }
 
 // ============================================================
-// Step 10: 平台回调验证
+// Step 10: 自动确认 OAuth
 // ============================================================
 
-async function executeContributionStep10(state) {
-  if (state.localhostUrl && !isLocalhostOAuthCallbackUrl(state.localhostUrl)) {
-    throw new Error('步骤 9 捕获到的 localhost OAuth 回调地址无效，请重新执行步骤 9。');
-  }
-  if (!state.localhostUrl) {
-    throw new Error('缺少 localhost 回调地址，请先完成步骤 9。');
-  }
-  if (!state.contributionSessionId) {
-    throw new Error('缺少贡献会话信息，请重新从步骤 7 开始。');
-  }
-  if (!contributionOAuthManager?.pollContributionStatus) {
-    throw new Error('贡献 OAuth 流程尚未接入，无法完成贡献模式的步骤 10。');
-  }
-
-  await addLog('步骤 10：贡献模式正在提交回调并等待最终结果...');
-
-  let latestState = await getState();
-  const callbackUrl = latestState.localhostUrl || state.localhostUrl;
-
-  if (!latestState.contributionCallbackUrl && contributionOAuthManager?.handleCapturedCallback) {
-    latestState = await contributionOAuthManager.handleCapturedCallback(callbackUrl, {
-      source: 'step10',
-    });
-  } else {
-    latestState = await contributionOAuthManager.pollContributionStatus({
-      reason: 'step10_initial',
-      stateOverride: latestState,
-    });
-  }
-
-  const timeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
-    ? await getOAuthFlowStepTimeoutMs(120000, {
-      step: 10,
-      actionLabel: '贡献流程最终结果',
-    })
-    : 120000;
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const status = String(latestState.contributionStatus || '').trim().toLowerCase();
-    if (contributionOAuthManager?.isContributionFinalStatus?.(status)) {
-      if (status === 'auto_approved' || status === 'manual_review_required') {
-        await addLog(`步骤 10：贡献流程已结束，最终状态：${latestState.contributionStatusMessage || status}`, status === 'auto_approved' ? 'ok' : 'warn');
-        await completeStepFromBackground(10, {
-          contributionStatus: status,
-          contributionStatusMessage: latestState.contributionStatusMessage || '',
-          localhostUrl: callbackUrl,
-        });
-        return;
-      }
-      throw new Error(latestState.contributionStatusMessage || '贡献流程失败。');
-    }
-
-    await sleepWithStop(2500);
-    latestState = await contributionOAuthManager.pollContributionStatus({
-      reason: 'step10_wait_final',
-      stateOverride: latestState,
-    });
-  }
-
-  throw new Error('步骤 10：等待贡献流程最终结果超时。');
+async function executeStep10(state) {
+  return step10Executor.executeStep10(state);
 }
 
-async function executeStep10(state) {
-  if (state?.contributionModeExpected && !state?.contributionMode) {
-    throw new Error('步骤 10：当前自动流程预期使用贡献模式，但运行态 contributionMode 已丢失，已阻止回退到普通 CPA / SUB2API 提交。请重新进入贡献模式后再点击自动。');
-  }
-  if (state?.contributionMode) {
-    return executeContributionStep10(state);
-  }
-  return step10Executor.executeStep10(state);
+// ============================================================
+// Step 11: 平台回调验证
+// ============================================================
+
+async function executeStep11(state) {
+  return step11Executor.executeStep11(state);
 }
 
 // ============================================================
@@ -7539,17 +8787,30 @@ async function executeStep10(state) {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== AUTO_RUN_TIMER_ALARM_NAME) {
-    return;
+  if (heroSmsManager?.onAlarm) {
+    heroSmsManager.onAlarm(alarm).then((handled) => {
+      if (handled) return;
+      if (alarm.name !== AUTO_RUN_TIMER_ALARM_NAME) return;
+      launchAutoRunTimerPlan('alarm').catch((err) => {
+        console.error(LOG_PREFIX, 'Failed to resume auto run from timer alarm:', err);
+      });
+    }).catch((err) => {
+      console.error(LOG_PREFIX, 'HeroSMS alarm handler error:', err);
+    });
+  } else {
+    if (alarm.name !== AUTO_RUN_TIMER_ALARM_NAME) return;
+    launchAutoRunTimerPlan('alarm').catch((err) => {
+      console.error(LOG_PREFIX, 'Failed to resume auto run from timer alarm:', err);
+    });
   }
-  launchAutoRunTimerPlan('alarm').catch((err) => {
-    console.error(LOG_PREFIX, 'Failed to resume auto run from timer alarm:', err);
-  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   restoreAutoRunTimerIfNeeded().catch((err) => {
     console.error(LOG_PREFIX, 'Failed to restore auto run timer on startup:', err);
+  });
+  heroSmsManager?.reconcileFailedActivationCleanupAlarms().catch((err) => {
+    console.error(LOG_PREFIX, 'Failed to reconcile hero-sms alarms on startup:', err);
   });
 });
 

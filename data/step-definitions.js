@@ -10,8 +10,9 @@
     { id: 6, order: 60, key: 'clear-login-cookies', title: '清理登录 Cookies' },
     { id: 7, order: 70, key: 'oauth-login', title: '刷新 OAuth 并登录' },
     { id: 8, order: 80, key: 'fetch-login-code', title: '获取登录验证码' },
-    { id: 9, order: 90, key: 'confirm-oauth', title: '自动确认 OAuth' },
-    { id: 10, order: 100, key: 'platform-verify', title: '平台回调验证' },
+    { id: 9, order: 90, key: 'phone-verify', title: '手机号验证' },
+    { id: 10, order: 100, key: 'confirm-oauth', title: '自动确认 OAuth' },
+    { id: 11, order: 110, key: 'platform-verify', title: '平台回调验证' },
   ];
 
   function getSteps() {

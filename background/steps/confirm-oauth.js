@@ -1,7 +1,7 @@
-(function attachBackgroundStep9(root, factory) {
-  root.MultiPageBackgroundStep9 = factory();
-})(typeof self !== 'undefined' ? self : globalThis, function createBackgroundStep9Module() {
-  function createStep9Executor(deps = {}) {
+(function attachBackgroundStep10(root, factory) {
+  root.MultiPageBackgroundStep10 = factory();
+})(typeof self !== 'undefined' ? self : globalThis, function createBackgroundStep10Module() {
+  function createStep10Executor(deps = {}) {
     const {
       addLog,
       chrome,
@@ -33,16 +33,16 @@
       setStep8TabUpdatedListener,
     } = deps;
 
-    async function executeStep9(state) {
+    async function executeStep10(state) {
       if (!state.oauthUrl) {
         throw new Error('缺少登录用 OAuth 链接，请先完成步骤 7。');
       }
 
-      await addLog('步骤 9：正在监听 localhost 回调地址...');
+      await addLog('步骤 10：正在监听 localhost 回调地址...');
 
       const callbackTimeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
         ? await getOAuthFlowStepTimeoutMs(120000, {
-          step: 9,
+          step: 10,
           actionLabel: 'OAuth localhost 回调',
         })
         : 120000;
@@ -56,7 +56,7 @@
           setStep8PendingReject(null);
         };
 
-        const rejectStep9 = (error) => {
+        const rejectStep10 = (error) => {
           if (resolved) return;
           resolved = true;
           clearTimeout(timeout);
@@ -64,15 +64,15 @@
           reject(error);
         };
 
-        const finalizeStep9Callback = (callbackUrl) => {
+        const finalizeStep10Callback = (callbackUrl) => {
           if (resolved || !callbackUrl) return;
 
           resolved = true;
           cleanupListener();
           clearTimeout(timeout);
 
-          addLog(`步骤 9：已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
-            return completeStepFromBackground(9, { localhostUrl: callbackUrl });
+          addLog(`步骤 10：已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
+            return completeStepFromBackground(10, { localhostUrl: callbackUrl });
           }).then(() => {
             resolve();
           }).catch((err) => {
@@ -81,26 +81,26 @@
         };
 
         const timeout = setTimeout(() => {
-          rejectStep9(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 9 的点击可能被拦截了。'));
+          rejectStep10(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 10 的点击可能被拦截了。'));
         }, callbackTimeoutMs);
 
         setStep8PendingReject((error) => {
-          rejectStep9(error);
+          rejectStep10(error);
         });
 
         setWebNavListener((details) => {
           const callbackUrl = getStep8CallbackUrlFromNavigation(details, signupTabId);
-          finalizeStep9Callback(callbackUrl);
+          finalizeStep10Callback(callbackUrl);
         });
 
         setWebNavCommittedListener((details) => {
           const callbackUrl = getStep8CallbackUrlFromNavigation(details, signupTabId);
-          finalizeStep9Callback(callbackUrl);
+          finalizeStep10Callback(callbackUrl);
         });
 
         setStep8TabUpdatedListener((tabId, changeInfo, tab) => {
           const callbackUrl = getStep8CallbackUrlFromTabUpdate(tabId, changeInfo, tab, signupTabId);
-          finalizeStep9Callback(callbackUrl);
+          finalizeStep10Callback(callbackUrl);
         });
 
         (async () => {
@@ -111,10 +111,10 @@
 
             if (signupTabId && await isTabAlive('signup-page')) {
               await chrome.tabs.update(signupTabId, { active: true });
-              await addLog('步骤 9：已切回认证页，正在准备调试器点击...');
+              await addLog('步骤 10：已切回认证页，正在准备调试器点击...');
             } else {
               signupTabId = await reuseOrCreateTab('signup-page', state.oauthUrl);
-              await addLog('步骤 9：已重新打开认证页，正在准备调试器点击...');
+              await addLog('步骤 10：已重新打开认证页，正在准备调试器点击...');
             }
 
             throwIfStep8SettledOrStopped(resolved);
@@ -124,11 +124,11 @@
             await ensureStep8SignupPageReady(signupTabId, {
               timeoutMs: typeof getOAuthFlowStepTimeoutMs === 'function'
                 ? await getOAuthFlowStepTimeoutMs(15000, {
-                  step: 9,
+                  step: 10,
                   actionLabel: '等待 OAuth 同意页内容脚本就绪',
                 })
                 : 15000,
-              logMessage: '步骤 9：认证页内容脚本尚未就绪，正在等待页面恢复...',
+              logMessage: '步骤 10：认证页内容脚本尚未就绪，正在等待页面恢复...',
             });
 
             for (let round = 1; round <= STEP8_MAX_ROUNDS && !resolved; round++) {
@@ -137,11 +137,12 @@
                 signupTabId,
                 typeof getOAuthFlowStepTimeoutMs === 'function'
                   ? await getOAuthFlowStepTimeoutMs(STEP8_READY_WAIT_TIMEOUT_MS, {
-                    step: 9,
+                    step: 10,
                     actionLabel: '等待 OAuth 同意页出现',
                   })
                   : STEP8_READY_WAIT_TIMEOUT_MS
               );
+
               if (!pageState?.consentReady) {
                 await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
                 continue;
@@ -149,12 +150,12 @@
 
               const strategy = STEP8_STRATEGIES[Math.min(round - 1, STEP8_STRATEGIES.length - 1)];
 
-              await addLog(`步骤 9：第 ${round}/${STEP8_MAX_ROUNDS} 轮尝试点击“继续”（${strategy.label}）...`);
+              await addLog(`步骤 10：第 ${round}/${STEP8_MAX_ROUNDS} 轮尝试点击"继续"（${strategy.label}）...`);
 
               if (strategy.mode === 'debugger') {
                 const clickActionTimeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
                   ? await getOAuthFlowStepTimeoutMs(15000, {
-                    step: 9,
+                    step: 10,
                     actionLabel: '定位 OAuth 同意页继续按钮',
                   })
                   : 15000;
@@ -167,7 +168,7 @@
               } else {
                 const clickActionTimeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
                   ? await getOAuthFlowStepTimeoutMs(15000, {
-                    step: 9,
+                    step: 10,
                     actionLabel: '点击 OAuth 同意页继续按钮',
                   })
                   : 15000;
@@ -186,7 +187,7 @@
                 pageState.url,
                 typeof getOAuthFlowStepTimeoutMs === 'function'
                   ? await getOAuthFlowStepTimeoutMs(15000, {
-                    step: 9,
+                    step: 10,
                     actionLabel: '等待 OAuth 同意页点击生效',
                   })
                   : 15000
@@ -196,20 +197,20 @@
               }
 
               if (effect.progressed) {
-                await addLog(`步骤 9：检测到本次点击已生效，${getStep8EffectLabel(effect)}，继续等待 localhost 回调...`, 'info');
+                await addLog(`步骤 10：检测到本次点击已生效，${getStep8EffectLabel(effect)}，继续等待 localhost 回调...`, 'info');
                 break;
               }
 
               if (round >= STEP8_MAX_ROUNDS) {
-                throw new Error(`步骤 9：连续 ${STEP8_MAX_ROUNDS} 轮点击“继续”后页面仍无反应。`);
+                throw new Error(`步骤 10：连续 ${STEP8_MAX_ROUNDS} 轮点击"继续"后页面仍无反应。`);
               }
 
-              await addLog(`步骤 9：${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）...`, 'warn');
+              await addLog(`步骤 10：${strategy.label} 本轮点击后页面无反应，正在刷新认证页后重试（下一轮 ${round + 1}/${STEP8_MAX_ROUNDS}）...`, 'warn');
               await reloadStep8ConsentPage(
                 signupTabId,
                 typeof getOAuthFlowStepTimeoutMs === 'function'
                   ? await getOAuthFlowStepTimeoutMs(30000, {
-                    step: 9,
+                    step: 10,
                     actionLabel: '刷新 OAuth 同意页',
                   })
                   : 30000
@@ -217,14 +218,14 @@
               await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
             }
           } catch (err) {
-            rejectStep9(err);
+            rejectStep10(err);
           }
         })();
       });
     }
 
-    return { executeStep9 };
+    return { executeStep10 };
   }
 
-  return { createStep9Executor };
+  return { createStep10Executor };
 });

@@ -34,8 +34,6 @@
     </div>
     <div class="header-btns">
       <div class="run-group">
-        <button id="btn-contribution-mode" class="btn btn-outline btn-sm btn-contribution-mode" type="button"
-          aria-pressed="false" title="进入贡献模式并打开上传页">贡献/使用</button>
         <input type="number" id="input-run-count" class="run-count-input" value="1" min="1" title="运行次数" />
         <button id="btn-auto-run" class="btn btn-success" title="自动执行全部步骤">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -81,17 +79,7 @@
     </div>
   </header>
 
-  <div id="contribution-update-layer" class="contribution-update-layer" hidden>
-    <div id="contribution-update-hint" class="contribution-update-hint" aria-live="polite" hidden>
-      <p id="contribution-update-hint-text" class="contribution-update-hint-text">
-        公告 / 使用教程有更新了，可点上方“贡献/使用”查看。
-      </p>
-      <button id="btn-dismiss-contribution-update-hint" class="contribution-update-hint-close" type="button"
-        aria-label="关闭更新提示" title="关闭更新提示">×</button>
-    </div>
-  </div>
-
-  <section id="update-section" hidden>
+  <section id=”update-section” hidden>
     <div class="update-card">
       <div class="update-card-header">
         <div class="update-card-copy">
@@ -112,38 +100,8 @@
         <select id="select-panel-mode" class="data-select">
           <option value="cpa">CPA 面板</option>
           <option value="sub2api">SUB2API</option>
+          <option value="codex2api">Codex2API</option>
         </select>
-      </div>
-      <div id="contribution-mode-panel" class="contribution-mode-panel" hidden>
-        <div class="contribution-mode-panel-header">
-          <span class="section-label">贡献模式</span>
-          <span class="contribution-mode-badge">CPA</span>
-        </div>
-        <p id="contribution-mode-text" class="contribution-mode-text">当前账号将用于支持项目维护。扩展会自动申请贡献登录地址并持续跟踪授权状态；如检测到回调地址，会自动提交，无需手动复制。</p>
-        <div class="data-row contribution-mode-field">
-          <span class="data-label">贡献昵称</span>
-          <input type="text" id="input-contribution-nickname" class="data-input" placeholder="可留空，将显示为匿名贡献者" />
-        </div>
-        <div class="data-row contribution-mode-field">
-          <span class="data-label">QQ</span>
-          <input type="text" id="input-contribution-qq" class="data-input" inputmode="numeric" placeholder="可留空，只能填写数字" />
-        </div>
-        <div class="contribution-mode-status-grid">
-          <div class="contribution-mode-status-card">
-            <span class="contribution-mode-status-label">OAUTH</span>
-            <span id="contribution-oauth-status" class="contribution-mode-status-value">未生成登录地址</span>
-          </div>
-          <div class="contribution-mode-status-card">
-            <span class="contribution-mode-status-label">回调</span>
-            <span id="contribution-callback-status" class="contribution-mode-status-value">等待回调</span>
-          </div>
-        </div>
-        <div id="contribution-mode-summary" class="contribution-mode-summary">等待开始贡献</div>
-        <div class="contribution-mode-actions">
-          <button id="btn-start-contribution" class="btn btn-primary btn-sm" type="button">开始贡献</button>
-          <button id="btn-open-contribution-upload" class="btn btn-outline btn-sm" type="button">已有认证文件？前往上传</button>
-          <button id="btn-exit-contribution-mode" class="btn btn-ghost btn-sm" type="button">退出贡献模式</button>
-        </div>
       </div>
       <div class="data-row" id="row-vps-url">
         <span class="data-label">CPA</span>
@@ -192,6 +150,16 @@
         <input type="text" id="input-sub2api-default-proxy" class="data-input"
           placeholder="留空则不使用代理；或填写代理名称 / ID" />
       </div>
+      <div class="data-row" id="row-codex2api-url" style="display:none;">
+        <span class="data-label">Codex2API</span>
+        <input type="text" id="input-codex2api-url" class="data-input"
+          placeholder="http://localhost:8080/admin/accounts" />
+      </div>
+      <div class="data-row" id="row-codex2api-admin-key" style="display:none;">
+        <span class="data-label">管理密钥</span>
+        <input type="password" id="input-codex2api-admin-key" class="data-input"
+          placeholder="请输入 Codex2API Admin Secret" />
+      </div>
       <div class="data-row" id="row-custom-password">
         <span class="data-label">账户密码</span>
         <div class="input-with-icon">
@@ -234,31 +202,6 @@
           <option value="icloud">iCloud 隐私邮箱</option>
           <option value="cloudflare-temp-email">Cloudflare Temp Email</option>
         </select>
-      </div>
-      <div class="data-row" id="row-temp-email-base-url" style="display:none;">
-        <span class="data-label">Temp API</span>
-        <input type="text" id="input-temp-email-base-url" class="data-input" placeholder="https://your-worker-domain" />
-      </div>
-      <div class="data-row" id="row-temp-email-admin-auth" style="display:none;">
-        <span class="data-label">Admin Auth</span>
-        <input type="password" id="input-temp-email-admin-auth" class="data-input data-input-with-icon" placeholder="Cloudflare Temp Email admin password" />
-      </div>
-      <div class="data-row" id="row-temp-email-custom-auth" style="display:none;">
-        <span class="data-label">Custom Auth</span>
-        <input type="password" id="input-temp-email-custom-auth" class="data-input data-input-with-icon" placeholder="仅当站点启用了访问密码时再填写；这是额外鉴权，不替代 Admin Auth。" />
-      </div>
-      <div class="data-row" id="row-temp-email-receive-mailbox" style="display:none;">
-        <span class="data-label">邮件接收</span>
-        <input type="text" id="input-temp-email-receive-mailbox" class="data-input" placeholder="用于接收转发邮件的邮箱，例如 1@email.example.com" />
-      </div>
-      <div class="data-row" id="row-temp-email-domain" style="display:none;">
-        <span class="data-label">Temp 域名</span>
-        <div class="data-inline">
-          <select id="select-temp-email-domain" class="data-select"></select>
-          <input type="text" id="input-temp-email-domain" class="data-input" placeholder="例如 mail.example.com"
-            style="display:none;" />
-          <button id="btn-temp-email-domain-mode" class="btn btn-outline btn-sm" type="button">添加</button>
-        </div>
       </div>
       <div class="data-row" id="row-cf-domain" style="display:none;">
         <span class="data-label">CF 域名</span>
@@ -388,6 +331,131 @@
         <button id="btn-save-settings" class="btn btn-outline btn-sm data-inline-btn" type="button">保存</button>
       </div>
     </div>
+    </div>
+    <div id="cloudflare-temp-email-section" class="data-card hotmail-card" style="display:none;">
+      <div class="section-mini-header">
+        <div class="section-mini-copy">
+          <span class="section-label">Cloudflare Temp Email</span>
+          <span class="data-value">用于生成邮箱或接收转发邮件</span>
+        </div>
+        <div class="section-mini-actions">
+          <button id="btn-cloudflare-temp-email-usage-guide" class="btn btn-ghost btn-xs" type="button">使用教程</button>
+          <button id="btn-cloudflare-temp-email-github" class="btn btn-ghost btn-xs" type="button">GitHub</button>
+        </div>
+      </div>
+      <div class="data-row" id="row-temp-email-base-url" style="display:none;">
+        <span class="data-label">Temp API</span>
+        <input type="text" id="input-temp-email-base-url" class="data-input" placeholder="https://your-worker-domain" />
+      </div>
+      <div class="data-row" id="row-temp-email-admin-auth" style="display:none;">
+        <span class="data-label">Admin Auth</span>
+        <input type="password" id="input-temp-email-admin-auth" class="data-input data-input-with-icon" placeholder="Cloudflare Temp Email admin password" />
+      </div>
+      <div class="data-row" id="row-temp-email-custom-auth" style="display:none;">
+        <span class="data-label">Custom Auth</span>
+        <input type="password" id="input-temp-email-custom-auth" class="data-input data-input-with-icon" placeholder="仅当站点启用了访问密码时再填写；这是额外鉴权，不替代 Admin Auth。" />
+      </div>
+      <div class="data-row" id="row-temp-email-receive-mailbox" style="display:none;">
+        <span class="data-label">邮件接收</span>
+        <input type="text" id="input-temp-email-receive-mailbox" class="data-input" placeholder="用于接收转发邮件的邮箱，例如 1@email.example.com" />
+      </div>
+      <div class="data-row" id="row-temp-email-random-subdomain-toggle" style="display:none;">
+        <span class="data-label">随机子域</span>
+        <div class="data-inline">
+          <label class="toggle-switch" for="input-temp-email-use-random-subdomain" title="依赖后端 RANDOM_SUBDOMAIN_DOMAINS 配置">
+            <input type="checkbox" id="input-temp-email-use-random-subdomain" />
+            <span class="toggle-switch-track" aria-hidden="true">
+              <span class="toggle-switch-thumb"></span>
+            </span>
+            <span>启用</span>
+          </label>
+          <span class="setting-caption">依赖后端 RANDOM_SUBDOMAIN_DOMAINS</span>
+        </div>
+      </div>
+      <div class="data-row" id="row-temp-email-domain" style="display:none;">
+        <span class="data-label">Temp 域名</span>
+        <div class="data-inline">
+          <select id="select-temp-email-domain" class="data-select"></select>
+          <input type="text" id="input-temp-email-domain" class="data-input" placeholder="例如 mail.example.com"
+            style="display:none;" />
+          <button id="btn-temp-email-domain-mode" class="btn btn-outline btn-sm" type="button">添加</button>
+        </div>
+      </div>
+    </div>
+    <div id="hero-sms-section" class="data-card hero-sms-card">
+      <div class="section-mini-header">
+        <div class="section-mini-copy">
+          <span class="section-label">HeroSMS 接码</span>
+        </div>
+        <div class="section-mini-actions">
+          <button id="btn-hero-sms-resend" class="btn btn-outline btn-xs" type="button">重新获取验证码</button>
+        </div>
+      </div>
+      <div class="data-row">
+        <span class="data-label">API 地址</span>
+        <input type="text" id="input-hero-sms-base-url" class="data-input mono" placeholder="https://hero-sms.com/stubs/handler_api.php" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">API Key</span>
+        <input type="password" id="input-hero-sms-api-key" class="data-input mono" placeholder="请输入 HeroSMS API Key" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">服务</span>
+        <input type="text" id="input-hero-sms-service" class="data-input mono" placeholder="例如 openai / oaipro" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">国家</span>
+        <input type="text" id="input-hero-sms-country" class="data-input mono" placeholder="国家代码，例如 6" />
+      </div>
+      <div class="hero-sms-runtime-card">
+        <div class="data-row">
+          <span class="data-label">当前号码</span>
+          <span id="display-hero-sms-phone" class="data-value data-value-fill mono truncate">等待进入手机号页面</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">剩余时间</span>
+          <span id="display-hero-sms-remaining" class="data-value mono">未分配</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">成功次数</span>
+          <span id="display-hero-sms-usage" class="data-value mono">0/5</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">最近验证码</span>
+          <span id="display-hero-sms-code" class="data-value mono">等待中</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">最近状态</span>
+          <span id="display-hero-sms-status" class="data-value data-value-fill mono truncate">未开始</span>
+        </div>
+      </div>
+      <div class="hero-sms-failed-card">
+        <div class="section-mini-header">
+          <div class="section-mini-copy">
+            <span class="section-label">活跃号码列表</span>
+          </div>
+          <div class="section-mini-actions">
+            <button id="btn-hero-sms-refresh-active" class="btn btn-ghost btn-xs" type="button">刷新</button>
+            <span id="display-hero-sms-active-count" class="data-value mono">0</span>
+          </div>
+        </div>
+        <div id="hero-sms-active-list" class="hero-sms-failed-list">
+          <div class="hero-sms-failed-empty">暂无活跃号码记录。</div>
+        </div>
+      </div>
+      <div class="hero-sms-failed-card">
+        <div class="section-mini-header">
+          <div class="section-mini-copy">
+            <span class="section-label">失败号码列表</span>
+          </div>
+          <div class="section-mini-actions">
+            <span id="display-hero-sms-failed-count" class="data-value mono">0</span>
+          </div>
+        </div>
+        <div id="hero-sms-failed-list" class="hero-sms-failed-list">
+          <div class="hero-sms-failed-empty">暂无失败号码记录。</div>
+        </div>
+      </div>
     </div>
     <div id="hotmail-section" class="data-card hotmail-card" style="display:none;">
       <div class="section-mini-header">
@@ -732,13 +800,11 @@
   <script src="../luckmail-utils.js"></script>
   <script src="../data/step-definitions.js"></script>
   <script src="update-service.js"></script>
-  <script src="contribution-content-update-service.js"></script>
   <script src="account-pool-ui.js"></script>
   <script src="hotmail-manager.js"></script>
   <script src="mail-2925-manager.js"></script>
   <script src="icloud-manager.js"></script>
   <script src="luckmail-manager.js"></script>
-  <script src="contribution-mode.js"></script>
   <script src="account-records-manager.js"></script>
   <script src="sidepanel.js"></script>
 </body>

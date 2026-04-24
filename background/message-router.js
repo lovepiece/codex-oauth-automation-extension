@@ -40,6 +40,7 @@
       getPendingAutoRunTimerPlan,
       getSourceLabel,
       getState,
+      getTabId,
       getStopRequested,
       handleAutoRunLoopUnhandledError,
       importSettingsBundle,
@@ -50,6 +51,7 @@
       isLocalhostOAuthCallbackUrl,
       isLuckmailProvider,
       isStopError,
+      isTabAlive,
       launchAutoRunTimerPlan,
       listIcloudAliases,
       listLuckmailPurchasesForManagement,
@@ -61,7 +63,6 @@
       notifyStepError,
       patchMail2925Account,
       patchHotmailAccount,
-      pollContributionStatus,
       registerTab,
       requestStop,
       handleCloudflareSecurityBlocked,
@@ -71,7 +72,6 @@
       selectLuckmailPurchase,
       setCurrentMail2925Account,
       setCurrentHotmailAccount,
-      setContributionMode,
       setEmailState,
       setEmailStateSilently,
       setIcloudAliasPreservedState,
@@ -84,7 +84,6 @@
       setStepStatus,
       skipAutoRunCountdown,
       skipStep,
-      startContributionFlow,
       startAutoRunLoop,
       deleteMail2925Account,
       deleteMail2925Accounts,
@@ -108,6 +107,23 @@
       return appendAccountRunRecord(status, state, reason);
     }
 
+    async function ensureManualStepPrerequisites(step) {
+      if (step !== 4) {
+        return;
+      }
+
+      const signupTabId = typeof getTabId === 'function'
+        ? await getTabId('signup-page')
+        : null;
+      const signupTabAlive = signupTabId && typeof isTabAlive === 'function'
+        ? await isTabAlive('signup-page')
+        : Boolean(signupTabId);
+
+      if (!signupTabId || !signupTabAlive) {
+        throw new Error('手动执行步骤 4 前，请先执行步骤 1 或步骤 2，确保认证页仍然打开并停留在验证码页。');
+      }
+    }
+
     async function handleStepData(step, payload) {
       switch (step) {
         case 1: {
@@ -121,6 +137,8 @@
           if (payload.sub2apiGroupId !== undefined) updates.sub2apiGroupId = payload.sub2apiGroupId || null;
           if (payload.sub2apiDraftName !== undefined) updates.sub2apiDraftName = payload.sub2apiDraftName || null;
           if (payload.sub2apiProxyId !== undefined) updates.sub2apiProxyId = payload.sub2apiProxyId || null;
+          if (payload.codex2apiSessionId !== undefined) updates.codex2apiSessionId = payload.codex2apiSessionId || null;
+          if (payload.codex2apiOAuthState !== undefined) updates.codex2apiOAuthState = payload.codex2apiOAuthState || null;
           if (Object.keys(updates).length) {
             await setState(updates);
           }
@@ -165,19 +183,17 @@
             loginVerificationRequestedAt: null,
           });
           break;
-        case 9:
+        case 10:
           if (payload.localhostUrl) {
             if (!isLocalhostOAuthCallbackUrl(payload.localhostUrl)) {
-              throw new Error('步骤 9 返回了无效的 localhost OAuth 回调地址。');
+              throw new Error('步骤 10 返回了无效的 localhost OAuth 回调地址。');
             }
             await setState({ localhostUrl: payload.localhostUrl });
             broadcastDataUpdate({ localhostUrl: payload.localhostUrl });
-          }
-          break;
-        case 10: {
-          if (payload.localhostUrl) {
             await closeLocalhostCallbackTabs(payload.localhostUrl);
           }
+          break;
+        case 11: {
           const latestState = await getState();
           if (latestState.currentHotmailAccountId && isHotmailProvider(latestState)) {
             await patchHotmailAccount(latestState.currentHotmailAccountId, {
@@ -262,11 +278,11 @@
             return { ok: true, error: errorMessage };
           }
 
-          const completionState = message.step === 10 ? await getState() : null;
+          const completionState = message.step === 11 ? await getState() : null;
           await setStepStatus(message.step, 'completed');
           await addLog(`步骤 ${message.step} 已完成`, 'ok');
           await handleStepData(message.step, message.payload);
-          if (message.step === 10 && typeof appendAccountRunRecord === 'function') {
+          if (message.step === 11 && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
           notifyStepComplete(message.step, message.payload);
@@ -307,70 +323,6 @@
           return { ok: true };
         }
 
-        case 'SET_CONTRIBUTION_MODE': {
-          const enabled = Boolean(message.payload?.enabled);
-          const state = await ensureManualInteractionAllowed(enabled ? '进入贡献模式' : '退出贡献模式');
-          if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
-            throw new Error(enabled ? '当前有步骤正在执行，无法进入贡献模式。' : '当前有步骤正在执行，无法退出贡献模式。');
-          }
-          if (typeof setContributionMode !== 'function') {
-            throw new Error('贡献模式切换能力未接入。');
-          }
-          return {
-            ok: true,
-            state: await setContributionMode(enabled),
-          };
-        }
-
-        case 'START_CONTRIBUTION_FLOW': {
-          const state = await ensureManualInteractionAllowed('开始贡献');
-          if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
-            throw new Error('当前有步骤正在执行，无法开始贡献流程。');
-          }
-          if (typeof startContributionFlow !== 'function') {
-            throw new Error('贡献 OAuth 流程尚未接入。');
-          }
-          return {
-            ok: true,
-            state: await startContributionFlow({
-              nickname: message.payload?.nickname,
-              qq: message.payload?.qq,
-            }),
-          };
-        }
-
-        case 'SET_CONTRIBUTION_PROFILE': {
-          const state = await getState();
-          if (!state?.contributionMode) {
-            throw new Error('请先进入贡献模式。');
-          }
-          const nickname = String(message.payload?.nickname || '').trim();
-          const qq = String(message.payload?.qq || '').trim();
-          if (qq && !/^\d{1,20}$/.test(qq)) {
-            throw new Error('QQ 只能填写数字，且长度不能超过 20 位。');
-          }
-          await setState({
-            contributionNickname: nickname,
-            contributionQq: qq,
-          });
-          return {
-            ok: true,
-            state: await getState(),
-          };
-        }
-
-        case 'POLL_CONTRIBUTION_STATUS': {
-          if (typeof pollContributionStatus !== 'function') {
-            throw new Error('贡献状态轮询能力尚未接入。');
-          }
-          return {
-            ok: true,
-            state: await pollContributionStatus({
-              reason: message.payload?.reason || 'sidepanel_poll',
-            }),
-          };
-        }
-
         case 'CLEAR_ACCOUNT_RUN_HISTORY': {
           const state = await getState();
           if (isAutoRunLockedState(state)) {
@@ -403,6 +355,9 @@
           }
           const step = message.payload.step;
           if (message.source === 'sidepanel') {
+            await ensureManualStepPrerequisites(step);
+          }
+          if (message.source === 'sidepanel') {
             await invalidateDownstreamAfterStepRestart(step, { logLabel: `步骤 ${step} 重新执行` });
           }
           if (message.payload.email) {
@@ -422,17 +377,6 @@
 
         case 'AUTO_RUN': {
           clearStopRequest();
-          if (Boolean(message.payload?.contributionMode) && typeof setContributionMode === 'function') {
-            await setContributionMode(true);
-            if (typeof setState === 'function') {
-              const contributionNickname = String(message.payload?.contributionNickname || '').trim();
-              const contributionQq = String(message.payload?.contributionQq || '').trim();
-              await setState({
-                contributionNickname,
-                contributionQq,
-              });
-            }
-          }
           const state = await getState();
           if (getPendingAutoRunTimerPlan(state)) {
             throw new Error('已有自动运行倒计时计划，请先取消或立即开始。');
@@ -447,17 +391,6 @@
 
         case 'SCHEDULE_AUTO_RUN': {
           clearStopRequest();
-          if (Boolean(message.payload?.contributionMode) && typeof setContributionMode === 'function') {
-            await setContributionMode(true);
-            if (typeof setState === 'function') {
-              const contributionNickname = String(message.payload?.contributionNickname || '').trim();
-              const contributionQq = String(message.payload?.contributionQq || '').trim();
-              await setState({
-                contributionNickname,
-                contributionQq,
-              });
-            }
-          }
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           return await scheduleAutoRun(totalRuns, {
             delayMinutes: message.payload?.delayMinutes,

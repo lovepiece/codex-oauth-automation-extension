@@ -15,6 +15,8 @@ function createRouter(overrides = {}) {
     notifyCompletions: [],
     notifyErrors: [],
     securityBlocks: [],
+    invalidations: [],
+    executedSteps: [],
   };
 
   const router = api.createMessageRouter({
@@ -41,7 +43,9 @@ function createRouter(overrides = {}) {
     disableUsedLuckmailPurchases: async () => {},
     doesStepUseCompletionSignal: () => false,
     ensureManualInteractionAllowed: async () => ({}),
-    executeStep: async () => {},
+    executeStep: async (step) => {
+      events.executedSteps.push(step);
+    },
     executeStepViaCompletionSignal: async () => {},
     exportSettingsBundle: async () => ({}),
     fetchGeneratedEmail: async () => '',
@@ -55,6 +59,7 @@ function createRouter(overrides = {}) {
     getPendingAutoRunTimerPlan: () => null,
     getSourceLabel: () => '',
     getState: async () => overrides.state || { stepStatuses: { 3: 'pending' } },
+    getTabId: overrides.getTabId || (async () => null),
     getStopRequested: () => false,
     handleAutoRunLoopUnhandledError: async () => {},
     handleCloudflareSecurityBlocked: overrides.handleCloudflareSecurityBlocked || (async (error) => {
@@ -63,13 +68,16 @@ function createRouter(overrides = {}) {
       return message.replace(/^CF_SECURITY_BLOCKED::/, '') || message;
     }),
     importSettingsBundle: async () => {},
-    invalidateDownstreamAfterStepRestart: async () => {},
+    invalidateDownstreamAfterStepRestart: async (step, options) => {
+      events.invalidations.push({ step, options });
+    },
     isCloudflareSecurityBlockedError: overrides.isCloudflareSecurityBlockedError || ((error) => /^CF_SECURITY_BLOCKED::/.test(typeof error === 'string' ? error : error?.message || '')),
     isAutoRunLockedState: () => false,
     isHotmailProvider: () => false,
     isLocalhostOAuthCallbackUrl: () => true,
     isLuckmailProvider: () => false,
     isStopError: () => false,
+    isTabAlive: overrides.isTabAlive || (async () => false),
     launchAutoRunTimerPlan: async () => {},
     listIcloudAliases: async () => [],
     listLuckmailPurchasesForManagement: async () => [],
@@ -225,4 +233,23 @@ test('message router stops the flow and surfaces cloudflare security block error
     ok: true,
     error: '您已触发Cloudflare 安全防护系统',
   });
+});
+
+test('message router blocks manual step 4 execution when signup page tab is missing', async () => {
+  const { router, events } = createRouter({
+    getTabId: async () => null,
+    isTabAlive: async () => false,
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'EXECUTE_STEP',
+      source: 'sidepanel',
+      payload: { step: 4 },
+    }, {}),
+    /手动执行步骤 4 前，请先执行步骤 1 或步骤 2/
+  );
+
+  assert.deepStrictEqual(events.invalidations, []);
+  assert.deepStrictEqual(events.executedSteps, []);
 });

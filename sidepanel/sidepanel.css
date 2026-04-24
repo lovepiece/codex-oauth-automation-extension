@@ -806,6 +806,17 @@ header {
   flex-shrink: 0;
 }
 
+#row-codex2api-url .data-label,
+#row-codex2api-admin-key .data-label {
+  width: 76px;
+}
+
+#row-codex2api-url .data-label {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
 .data-value {
   font-size: 13px;
   color: var(--text-muted);
@@ -2393,6 +2404,19 @@ header {
   line-height: 1.55;
   color: var(--text-secondary);
   margin-bottom: 14px;
+  white-space: pre-line;
+}
+
+.modal-message a,
+.modal-alert a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.modal-message a:hover,
+.modal-alert a:hover {
+  color: var(--cyan);
 }
 
 .modal-alert {

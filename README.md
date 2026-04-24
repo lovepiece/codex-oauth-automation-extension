@@ -4,46 +4,6 @@
 
 当前版本基于侧边栏控制，支持单步执行、整套自动执行、停止当前流程、保存常用配置，以及通过 DuckDuckGo / QQ / 163 / Inbucket / Hotmail 协助获取验证码。
 
-## 插件效果
-
-一百五十个号，一个401：
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/交流群.jpg" alt="QQ交流群，便于大家交流" width="100%" />
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/十轮自动.png" alt="最新版本运行日志" width="100%" />
-    </td>
-  </tr>
-</table>
-
-## 打赏一下
-
-佬们觉得好用的话，也可以打赏小弟一杯奶茶哦
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/支付宝.jpg" alt="支付宝收款码" width="100%" />
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/微信.png" alt="微信收款码" width="100%" />
-    </td>
-  </tr>
-</table>
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=QLHazyCoder%2Fcodex-oauth-automation-extension&type=timeline&logscale&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&legend=top-left" />
-  </picture>
-</a>
-
 ## 当前能力
 
 - 从 CPA 面板自动获取 OpenAI OAuth 授权链接
@@ -132,7 +92,15 @@
 4. Step 1 会直接在 SUB2API 后台生成 OAuth 链接
 5. Step 10 会把 localhost 回调提交回 SUB2API，并直接创建 OpenAI 账号
 
-### 方案 C：`Hotmail 账号池`
+### 方案 C：`Codex2API + QQ / 163 / 163 VIP`
+
+1. `来源` 选择 `Codex2API`
+2. 填好 `Codex2API` 后台地址、管理密钥
+3. `Mail` 与 `邮箱生成` 的配置方式同方案 A
+4. Step 7 会直接通过 Codex2API 协议 `/api/admin/oauth/generate-auth-url` 生成 OAuth 链接
+5. Step 10 会把 localhost 回调中的 `code / state` 通过 `/api/admin/oauth/exchange-code` 直接提交给 Codex2API
+
+### 方案 D：`Hotmail 账号池`
 
 1. `Mail` 选择 `Hotmail`
 2. 在 `Hotmail 账号池` 中添加 `邮箱 / Client ID / Refresh Token`
@@ -140,7 +108,7 @@
 4. 通过后再执行步骤或 `Auto`
 5. 当前项目中，`Mail = Hotmail` 时会直接使用账号池里的邮箱作为注册邮箱，不再走 `Duck / Cloudflare` 自动生成
 
-### 方案 D：`2925 账号池`
+### 方案 E：`2925 账号池`
 
 1. `Mail` 选择 `2925`
 2. 在 `2925 账号池` 中添加 `邮箱 / 密码`
@@ -176,6 +144,20 @@ Step 1 和 Step 10 都依赖这个地址。
 - `默认代理`：可选，填写代理名称或代理 ID；留空时不使用代理
 
 插件会在 Step 1 和 Step 10 自动从 `/api/v1/admin/proxies/all` 解析这个代理，并在 OAuth 链接生成、授权码交换和账号创建请求中附带 `proxy_id`。如果名称匹配到多个代理，请改填代理 ID；留空则不会发送 `proxy_id`。
+
+### `Codex2API`
+
+当 `来源 = Codex2API` 时，需要配置：
+
+- `Codex2API`：后台账号管理页地址，默认 `http://localhost:8080/admin/accounts`
+- `管理密钥`：Codex2API 的 `Admin Secret`
+
+插件会在：
+
+- Step 7 调用 `POST /api/admin/oauth/generate-auth-url` 生成授权链接
+- Step 10 调用 `POST /api/admin/oauth/exchange-code` 完成 localhost callback 的授权码交换并创建账号
+
+这条来源是协议直连，不依赖 Codex2API 后台页面的“添加账号 / OAuth 授权 / 生成授权链接”按钮 DOM。
 
 ### `Mail`
 

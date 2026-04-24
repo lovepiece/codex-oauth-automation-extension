@@ -72,7 +72,7 @@
       const signupTabId = await getTabId('signup-page');
 
       if (!signupTabId) {
-        throw new Error('认证页面标签页已关闭，无法继续步骤 4。');
+        throw new Error('认证页面标签页已关闭，无法继续步骤 4。请先执行步骤 1 或步骤 2，重新打开认证页后再试。');
       }
 
       await chrome.tabs.update(signupTabId, { active: true });

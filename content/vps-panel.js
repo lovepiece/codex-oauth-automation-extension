@@ -1,4 +1,4 @@
-// content/vps-panel.js — Content script for CPA panel (steps 7, 10 / OAuth URL request)
+// content/vps-panel.js — Content script for CPA panel (steps 7, 11 / OAuth URL request)
 // Injected on: CPA panel (user-configured URL)
 //
 // Actual DOM structure (after login click):
@@ -86,7 +86,7 @@ if (document.documentElement.getAttribute(VPS_PANEL_LISTENER_SENTINEL) !== '1') 
 async function handleStep(step, payload) {
   switch (step) {
     case 1: return await step1_getOAuthLink(payload);
-    case 10: return await step9_vpsVerify(payload);
+    case 11: return await step9_vpsVerify(payload);
     default:
       throw new Error(`vps-panel.js 不处理步骤 ${step}`);
   }

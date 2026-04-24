@@ -69,15 +69,141 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Find mail items
 // ============================================================
 
-function findMailItems() {
-  return document.querySelectorAll('div[sign="letter"]');
+function normalizeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function getCurrentMailIds() {
+function isVisibleNode(node) {
+  if (!node) return false;
+  if (node.hidden) return false;
+
+  const style = typeof window.getComputedStyle === 'function'
+    ? window.getComputedStyle(node)
+    : null;
+  if (style && (style.display === 'none' || style.visibility === 'hidden')) {
+    return false;
+  }
+
+  const rect = typeof node.getBoundingClientRect === 'function'
+    ? node.getBoundingClientRect()
+    : null;
+  if (rect && rect.width <= 0 && rect.height <= 0) {
+    return false;
+  }
+
+  return true;
+}
+
+function isLikelyMailItemNode(node) {
+  if (!isVisibleNode(node)) {
+    return false;
+  }
+  if (node.matches?.('div[sign="letter"]')) {
+    return true;
+  }
+  if (node.querySelector?.('.nui-user, span.da0, [sign="trash"], [title="删除邮件"], [class*="subject"], [class*="sender"]')) {
+    return true;
+  }
+
+  const summaryText = normalizeText(
+    node.getAttribute?.('aria-label')
+    || node.getAttribute?.('title')
+    || node.textContent
+  );
+  if (!summaryText) {
+    return false;
+  }
+
+  return /发件人|验证码|verification|chatgpt|openai|code/i.test(summaryText);
+}
+
+function findMailItems() {
+  const selectorGroups = [
+    'div[sign="letter"]',
+    '[role="option"][aria-label]',
+    '[role="listitem"][aria-label]',
+    'tr[aria-label]',
+    'li[aria-label]',
+    'div[aria-label]',
+  ];
+
+  for (const selector of selectorGroups) {
+    const matches = Array.from(document.querySelectorAll(selector)).filter(isLikelyMailItemNode);
+    if (matches.length > 0) {
+      return matches;
+    }
+  }
+
+  return [];
+}
+
+function getMailTextBySelectors(item, selectors = []) {
+  for (const selector of selectors) {
+    const candidates = item.querySelectorAll(selector);
+    for (const candidate of candidates) {
+      const texts = [
+        candidate.getAttribute?.('title'),
+        candidate.getAttribute?.('aria-label'),
+        candidate.textContent,
+      ];
+      for (const text of texts) {
+        const normalized = normalizeText(text);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+  }
+  return '';
+}
+
+function getMailSenderText(item) {
+  return getMailTextBySelectors(item, [
+    '.nui-user',
+    '[class*="sender"]',
+    '[class*="from"]',
+    '[data-sender]',
+  ]);
+}
+
+function getMailSubjectText(item) {
+  return getMailTextBySelectors(item, [
+    'span.da0',
+    '[class*="subject"]',
+    '[data-subject]',
+    'strong',
+  ]);
+}
+
+function getMailRowText(item) {
+  const ariaLabel = normalizeText(item.getAttribute('aria-label'));
+  const sender = getMailSenderText(item);
+  const subject = getMailSubjectText(item);
+  const fullText = normalizeText(item.textContent || '');
+  return normalizeText([ariaLabel, sender, subject, fullText].filter(Boolean).join(' '));
+}
+
+function getMailItemId(item, index = 0) {
+  const candidates = [
+    item.getAttribute('id'),
+    item.getAttribute('data-id'),
+    item.dataset?.id,
+    item.getAttribute('data-key'),
+    item.getAttribute('key'),
+  ].filter(Boolean);
+
+  if (candidates.length > 0) {
+    return String(candidates[0]);
+  }
+
+  return `${index}|${getMailRowText(item).slice(0, 240)}`;
+}
+
+function getCurrentMailIds(items = []) {
   const ids = new Set();
-  findMailItems().forEach(item => {
-    const id = item.getAttribute('id') || '';
-    if (id) ids.add(id);
+  const sourceItems = items.length > 0 ? items : findMailItems();
+  sourceItems.forEach((item, index) => {
+    ids.add(getMailItemId(item, index));
   });
   return ids;
 }
@@ -90,7 +216,7 @@ function normalizeMinuteTimestamp(timestamp) {
 }
 
 function parseMail163Timestamp(rawText) {
-  const text = (rawText || '').replace(/\s+/g, ' ').trim();
+  const text = normalizeText(rawText);
   if (!text) return null;
 
   let match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})/);
@@ -100,6 +226,37 @@ function parseMail163Timestamp(rawText) {
       Number(year),
       Number(month) - 1,
       Number(day),
+      Number(hour),
+      Number(minute),
+      0,
+      0
+    ).getTime();
+  }
+
+  match = text.match(/今天\s*(\d{1,2}):(\d{2})/);
+  if (match) {
+    const [, hour, minute] = match;
+    const now = new Date();
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      Number(hour),
+      Number(minute),
+      0,
+      0
+    ).getTime();
+  }
+
+  match = text.match(/昨天\s*(\d{1,2}):(\d{2})/);
+  if (match) {
+    const [, hour, minute] = match;
+    const now = new Date();
+    now.setDate(now.getDate() - 1);
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
       Number(hour),
       Number(minute),
       0,
@@ -125,24 +282,182 @@ function parseMail163Timestamp(rawText) {
   return null;
 }
 
-function getMailTimestamp(item) {
-  const candidates = [];
-  const timeCell = item.querySelector('.e00[title], [title*="年"][title*=":"]');
-  if (timeCell?.getAttribute('title')) candidates.push(timeCell.getAttribute('title'));
-  if (timeCell?.textContent) candidates.push(timeCell.textContent);
+function isLikelyMailTimestampText(value) {
+  const text = normalizeText(value);
+  if (!text) {
+    return false;
+  }
+  return /(\d{4}年\d{1,2}月\d{1,2}日\s+\d{1,2}:\d{2})|今天\s*\d{1,2}:\d{2}|昨天\s*\d{1,2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(text);
+}
 
-  const titledNodes = item.querySelectorAll('[title]');
-  titledNodes.forEach((node) => {
-    const title = node.getAttribute('title');
-    if (title) candidates.push(title);
+function collectMailTimestampCandidates(item) {
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized || !isLikelyMailTimestampText(normalized) || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  const priorityNodes = item.querySelectorAll('.e00, [title], [aria-label], time, [class*="time"], [class*="date"]');
+  priorityNodes.forEach((node) => {
+    pushCandidate(node.getAttribute?.('title'));
+    pushCandidate(node.getAttribute?.('aria-label'));
+    pushCandidate(node.textContent);
   });
 
+  const textNodes = item.querySelectorAll('span, div, td, strong, b');
+  textNodes.forEach((node) => {
+    const text = normalizeText(node.textContent);
+    if (text && text.length <= 24) {
+      pushCandidate(text);
+    }
+  });
+
+  pushCandidate(item.getAttribute('aria-label'));
+  pushCandidate(item.getAttribute('title'));
+  return candidates;
+}
+
+function getMailTimestamp(item) {
+  const candidates = collectMailTimestampCandidates(item);
   for (const candidate of candidates) {
     const parsed = parseMail163Timestamp(candidate);
     if (parsed) return parsed;
   }
 
   return null;
+}
+
+function collectOpenedMailTextCandidates() {
+  const texts = [];
+  const seen = new Set();
+  const pushText = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    texts.push(normalized);
+  };
+
+  const selectors = [
+    '.readHtml',
+    '[class*="readmail"]',
+    '[class*="mailread"]',
+    '[class*="mailBody"]',
+    '[class*="mailbody"]',
+    '[class*="mail-content"]',
+    '[class*="mailContent"]',
+    '[class*="mail-detail"]',
+    '[class*="mailDetail"]',
+    '[class*="detail"] [class*="content"]',
+    '[class*="read"] [class*="content"]',
+    '[role="main"]',
+  ];
+
+  selectors.forEach((selector) => {
+    document.querySelectorAll(selector).forEach((node) => {
+      pushText(node.innerText || node.textContent);
+    });
+  });
+
+  document.querySelectorAll('iframe').forEach((frame) => {
+    try {
+      pushText(frame.contentDocument?.body?.innerText || frame.contentDocument?.body?.textContent);
+    } catch {
+      // Ignore cross-frame access errors and keep trying other candidates.
+    }
+  });
+
+  pushText(document.body?.innerText || document.body?.textContent);
+  return texts.sort((a, b) => b.length - a.length);
+}
+
+function selectOpenedMailTextCandidate(item, candidates = [], options = {}) {
+  const subject = normalizeText(getMailSubjectText(item)).toLowerCase();
+  const sender = normalizeText(getMailSenderText(item)).toLowerCase();
+  const excludedSet = new Set((options.excludedTexts || []).map((value) => normalizeText(value)));
+  const allowExcludedFallback = options.allowExcludedFallback !== false;
+
+  const pickCandidate = (source) => source.find((candidate) => {
+    const lower = candidate.toLowerCase();
+    if (subject && lower.includes(subject)) {
+      return true;
+    }
+    if (sender && lower.includes(sender)) {
+      return true;
+    }
+    return Boolean(extractVerificationCode(candidate) && /chatgpt|openai|verification|验证码|login code/i.test(lower));
+  }) || source[0] || '';
+
+  const filteredCandidates = candidates.filter((candidate) => !excludedSet.has(normalizeText(candidate)));
+  const preferred = pickCandidate(filteredCandidates);
+  if (preferred || !allowExcludedFallback) {
+    return preferred;
+  }
+
+  return pickCandidate(candidates);
+}
+
+function readOpenedMailText(item, options = {}) {
+  const candidates = collectOpenedMailTextCandidates();
+  return selectOpenedMailTextCandidate(item, candidates, options);
+}
+
+async function returnToInbox() {
+  const inboxLink = document.querySelector('.nui-tree-item-text[title="收件箱"], [title="收件箱"]');
+  if (inboxLink) {
+    if (typeof simulateClick === 'function') {
+      simulateClick(inboxLink);
+    } else {
+      inboxLink.click();
+    }
+  }
+
+  for (let i = 0; i < 20; i += 1) {
+    if (findMailItems().length > 0) {
+      return true;
+    }
+    await sleep(250);
+  }
+
+  return false;
+}
+
+async function openMailAndGetMessageText(item) {
+  const beforeCandidates = collectOpenedMailTextCandidates();
+  const beforeText = selectOpenedMailTextCandidate(item, beforeCandidates);
+  if (typeof simulateClick === 'function') {
+    simulateClick(item);
+  } else {
+    item.click();
+  }
+
+  let openedText = '';
+  for (let i = 0; i < 24; i += 1) {
+    await sleep(250);
+    const candidate = readOpenedMailText(item, {
+      excludedTexts: beforeCandidates,
+      allowExcludedFallback: false,
+    });
+    if (!candidate) {
+      continue;
+    }
+    openedText = candidate;
+    if (extractVerificationCode(candidate)) {
+      break;
+    }
+    if (candidate !== beforeText && candidate.length > beforeText.length + 24) {
+      break;
+    }
+  }
+
+  await returnToInbox();
+  return openedText;
 }
 
 function scheduleEmailCleanup(item, step) {
@@ -199,7 +514,7 @@ async function handlePollEmail(step, payload) {
   log(`步骤 ${step}：邮件列表已加载，共 ${items.length} 封邮件`);
 
   // Snapshot existing mail IDs
-  const existingMailIds = getCurrentMailIds();
+  const existingMailIds = getCurrentMailIds(items);
   log(`步骤 ${step}：已记录当前 ${existingMailIds.size} 封旧邮件快照`);
 
   const FALLBACK_AFTER = 3;
@@ -215,38 +530,58 @@ async function handlePollEmail(step, payload) {
     const allItems = findMailItems();
     const useFallback = attempt > FALLBACK_AFTER;
 
-    for (const item of allItems) {
-      const id = item.getAttribute('id') || '';
+    for (let index = 0; index < allItems.length; index++) {
+      const item = allItems[index];
+      const id = getMailItemId(item, index);
       const mailTimestamp = getMailTimestamp(item);
       const mailMinute = normalizeMinuteTimestamp(mailTimestamp || 0);
       const passesTimeFilter = !filterAfterMinute || (mailMinute && mailMinute >= filterAfterMinute);
-      const shouldBypassOldSnapshot = Boolean(filterAfterMinute && passesTimeFilter && mailMinute > 0);
 
       if (!passesTimeFilter) {
         continue;
       }
 
-      if (!useFallback && !shouldBypassOldSnapshot && existingMailIds.has(id)) continue;
+      if (!useFallback && existingMailIds.has(id)) {
+        continue;
+      }
 
-      const senderEl = item.querySelector('.nui-user');
-      const sender = senderEl ? senderEl.textContent.toLowerCase() : '';
+      const sender = getMailSenderText(item).toLowerCase();
+      const subject = getMailSubjectText(item);
+      const rowText = getMailRowText(item);
+      const ariaLabel = normalizeText(item.getAttribute('aria-label')).toLowerCase();
+      const combinedText = normalizeText([subject, ariaLabel, rowText].filter(Boolean).join(' '));
 
-      const subjectEl = item.querySelector('span.da0');
-      const subject = subjectEl ? subjectEl.textContent : '';
+      if (!mailTimestamp) {
+        log(`步骤 ${step}：邮件 ${id.slice(0, 60)} 未读取到时间，已跳过时间窗口校验后的文本匹配阶段。`, 'info');
+      }
 
-      const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase();
-
-      const senderMatch = senderFilters.some(f => sender.includes(f.toLowerCase()) || ariaLabel.includes(f.toLowerCase()));
-      const subjectMatch = subjectFilters.some(f => subject.toLowerCase().includes(f.toLowerCase()) || ariaLabel.includes(f.toLowerCase()));
+      const senderMatch = senderFilters.some((filter) => {
+        const normalizedFilter = String(filter || '').toLowerCase();
+        return normalizedFilter && (sender.includes(normalizedFilter) || ariaLabel.includes(normalizedFilter) || rowText.toLowerCase().includes(normalizedFilter));
+      });
+      const subjectMatch = subjectFilters.some((filter) => {
+        const normalizedFilter = String(filter || '').toLowerCase();
+        return normalizedFilter && (subject.toLowerCase().includes(normalizedFilter) || ariaLabel.includes(normalizedFilter) || rowText.toLowerCase().includes(normalizedFilter));
+      });
 
       if (senderMatch || subjectMatch) {
-        const code = extractVerificationCode(subject + ' ' + ariaLabel);
+        let code = extractVerificationCode(combinedText);
+        let codeSource = '邮件列表';
+
+        if (!code) {
+          const openedText = await openMailAndGetMessageText(item);
+          code = extractVerificationCode(openedText);
+          if (code) {
+            codeSource = '邮件正文';
+          }
+        }
+
         if (code && excludedCodeSet.has(code)) {
           log(`步骤 ${step}：跳过排除的验证码：${code}`, 'info');
         } else if (code && !seenCodes.has(code)) {
           seenCodes.add(code);
           persistSeenCodes();
-          const source = useFallback && existingMailIds.has(id) ? '回退匹配邮件' : '新邮件';
+          const source = useFallback && existingMailIds.has(id) ? `回退匹配${codeSource}` : `新邮件${codeSource}`;
           const timeLabel = mailTimestamp ? `，时间：${new Date(mailTimestamp).toLocaleString('zh-CN', { hour12: false })}` : '';
           log(`步骤 ${step}：已找到验证码：${code}（来源：${source}${timeLabel}，主题：${subject.slice(0, 40)}）`, 'ok');
 

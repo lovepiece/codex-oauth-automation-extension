@@ -33,16 +33,6 @@ const updateCardSummary = document.getElementById('update-card-summary');
 const updateReleaseList = document.getElementById('update-release-list');
 const btnOpenRelease = document.getElementById('btn-open-release');
 const settingsCard = document.getElementById('settings-card');
-const contributionModePanel = document.getElementById('contribution-mode-panel');
-const contributionModeText = document.getElementById('contribution-mode-text');
-const inputContributionNickname = document.getElementById('input-contribution-nickname');
-const inputContributionQq = document.getElementById('input-contribution-qq');
-const contributionOauthStatus = document.getElementById('contribution-oauth-status');
-const contributionCallbackStatus = document.getElementById('contribution-callback-status');
-const contributionModeSummary = document.getElementById('contribution-mode-summary');
-const btnStartContribution = document.getElementById('btn-start-contribution');
-const btnOpenContributionUpload = document.getElementById('btn-open-contribution-upload');
-const btnExitContributionMode = document.getElementById('btn-exit-contribution-mode');
 const displayOauthUrl = document.getElementById('display-oauth-url');
 const displayLocalhostUrl = document.getElementById('display-localhost-url');
 const displayStatus = document.getElementById('display-status');
@@ -56,11 +46,6 @@ const btnTogglePassword = document.getElementById('btn-toggle-password');
 const btnSaveSettings = document.getElementById('btn-save-settings');
 const btnStop = document.getElementById('btn-stop');
 const btnReset = document.getElementById('btn-reset');
-const btnContributionMode = document.getElementById('btn-contribution-mode');
-const contributionUpdateLayer = document.getElementById('contribution-update-layer');
-const contributionUpdateHint = document.getElementById('contribution-update-hint');
-const contributionUpdateHintText = document.getElementById('contribution-update-hint-text');
-const btnDismissContributionUpdateHint = document.getElementById('btn-dismiss-contribution-update-hint');
 const stepsProgress = document.getElementById('steps-progress');
 const btnAutoRun = document.getElementById('btn-auto-run');
 const btnAutoContinue = document.getElementById('btn-auto-continue');
@@ -94,6 +79,10 @@ const rowSub2ApiGroup = document.getElementById('row-sub2api-group');
 const inputSub2ApiGroup = document.getElementById('input-sub2api-group');
 const rowSub2ApiDefaultProxy = document.getElementById('row-sub2api-default-proxy');
 const inputSub2ApiDefaultProxy = document.getElementById('input-sub2api-default-proxy');
+const rowCodex2ApiUrl = document.getElementById('row-codex2api-url');
+const inputCodex2ApiUrl = document.getElementById('input-codex2api-url');
+const rowCodex2ApiAdminKey = document.getElementById('row-codex2api-admin-key');
+const inputCodex2ApiAdminKey = document.getElementById('input-codex2api-admin-key');
 const rowCustomPassword = document.getElementById('row-custom-password');
 const selectMailProvider = document.getElementById('select-mail-provider');
 const btnMailLogin = document.getElementById('btn-mail-login');
@@ -110,10 +99,31 @@ const rowTempEmailCustomAuth = document.getElementById('row-temp-email-custom-au
 const inputTempEmailCustomAuth = document.getElementById('input-temp-email-custom-auth');
 const rowTempEmailReceiveMailbox = document.getElementById('row-temp-email-receive-mailbox');
 const inputTempEmailReceiveMailbox = document.getElementById('input-temp-email-receive-mailbox');
+const rowTempEmailRandomSubdomainToggle = document.getElementById('row-temp-email-random-subdomain-toggle');
+const inputTempEmailUseRandomSubdomain = document.getElementById('input-temp-email-use-random-subdomain');
 const rowTempEmailDomain = document.getElementById('row-temp-email-domain');
 const selectTempEmailDomain = document.getElementById('select-temp-email-domain');
 const inputTempEmailDomain = document.getElementById('input-temp-email-domain');
 const btnTempEmailDomainMode = document.getElementById('btn-temp-email-domain-mode');
+const cloudflareTempEmailSection = document.getElementById('cloudflare-temp-email-section');
+const btnCloudflareTempEmailUsageGuide = document.getElementById('btn-cloudflare-temp-email-usage-guide');
+const btnCloudflareTempEmailGithub = document.getElementById('btn-cloudflare-temp-email-github');
+const heroSmsSection = document.getElementById('hero-sms-section');
+const inputHeroSmsBaseUrl = document.getElementById('input-hero-sms-base-url');
+const inputHeroSmsApiKey = document.getElementById('input-hero-sms-api-key');
+const inputHeroSmsService = document.getElementById('input-hero-sms-service');
+const inputHeroSmsCountry = document.getElementById('input-hero-sms-country');
+const displayHeroSmsPhone = document.getElementById('display-hero-sms-phone');
+const displayHeroSmsRemaining = document.getElementById('display-hero-sms-remaining');
+const displayHeroSmsUsage = document.getElementById('display-hero-sms-usage');
+const displayHeroSmsCode = document.getElementById('display-hero-sms-code');
+const displayHeroSmsStatus = document.getElementById('display-hero-sms-status');
+const btnHeroSmsRefreshActive = document.getElementById('btn-hero-sms-refresh-active');
+const displayHeroSmsActiveCount = document.getElementById('display-hero-sms-active-count');
+const heroSmsActiveList = document.getElementById('hero-sms-active-list');
+const displayHeroSmsFailedCount = document.getElementById('display-hero-sms-failed-count');
+const heroSmsFailedList = document.getElementById('hero-sms-failed-list');
+const btnHeroSmsResend = document.getElementById('btn-hero-sms-resend');
 const hotmailSection = document.getElementById('hotmail-section');
 const mail2925Section = document.getElementById('mail2925-section');
 const luckmailSection = document.getElementById('luckmail-section');
@@ -246,15 +256,17 @@ const DEFAULT_CPA_CALLBACK_MODE = 'step8';
 const MAIL_2925_MODE_PROVIDE = 'provide';
 const MAIL_2925_MODE_RECEIVE = 'receive';
 const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
+const NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-new-user-guide-prompt-dismissed';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
-const CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY = 'multipage-contribution-content-prompt-dismissed-version';
 const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 3;
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const ICLOUD_PROVIDER = 'icloud';
 const GMAIL_PROVIDER = 'gmail';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
+const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
+const HERO_SMS_NUMBER_MAX_USES = 5;
 const DEFAULT_LUCKMAIL_BASE_URL = 'https://mails.luckyous.com';
 const DEFAULT_LUCKMAIL_EMAIL_TYPE = 'ms_graph';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
@@ -513,6 +525,10 @@ let settingsSaveInFlight = false;
 let settingsAutoSaveTimer = null;
 let cloudflareDomainEditMode = false;
 let cloudflareTempEmailDomainEditMode = false;
+let heroSmsActionInFlight = false;
+let heroSmsActiveRefreshInFlight = false;
+let heroSmsAutoReleaseInFlight = false;
+let heroSmsAutoReleaseKey = '';
 let modalChoiceResolver = null;
 let currentModalActions = [];
 let modalResultBuilder = null;
@@ -520,8 +536,6 @@ let scheduledCountdownTimer = null;
 let configMenuOpen = false;
 let configActionInFlight = false;
 let currentReleaseSnapshot = null;
-let currentContributionContentSnapshot = null;
-let contributionContentSnapshotRequestInFlight = null;
 
 const EYE_OPEN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_CLOSED_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19C5 19 1 12 1 12a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.86 21.86 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>';
@@ -539,7 +553,6 @@ const normalizeLuckmailTimestampValue = window.LuckMailUtils?.normalizeTimestamp
     return Number.isFinite(timestamp) ? timestamp : 0;
   });
 const sidepanelUpdateService = window.SidepanelUpdateService;
-const contributionContentService = window.SidepanelContributionContentService;
 const DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME = window.LuckMailUtils?.DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME || '保留';
 const normalizeIcloudHost = window.IcloudUtils?.normalizeIcloudHost
   || ((value) => {
@@ -606,6 +619,10 @@ const LOG_LEVEL_LABELS = {
   error: '错误',
 };
 
+const CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL = 'https://github.com/dreamhunter2333/cloudflare_temp_email';
+const CLOUDFLARE_TEMP_EMAIL_BUILD_TUTORIAL_URL = 'https://linux.do/t/topic/316819';
+const CLOUDFLARE_TEMP_EMAIL_RANDOM_SUBDOMAIN_ISSUE_URL = 'https://github.com/dreamhunter2333/cloudflare_temp_email/issues/942';
+
 function usesGeneratedAliasMailProvider(provider, mail2925Mode = getSelectedMail2925Mode()) {
   return isManagedAliasProvider(provider, mail2925Mode);
 }
@@ -668,6 +685,19 @@ function resetActionModalAlert() {
   autoStartAlert.hidden = true;
   autoStartAlert.textContent = '';
   autoStartAlert.className = 'modal-alert';
+}
+
+function setActionModalMessageContent({ text = '', html = '' } = {}) {
+  if (!autoStartMessage) {
+    return;
+  }
+
+  if (html) {
+    autoStartMessage.innerHTML = html;
+    return;
+  }
+
+  autoStartMessage.textContent = text;
 }
 
 function resetActionModalButtons() {
@@ -745,7 +775,7 @@ function resolveModalChoice(choice) {
   }
 }
 
-function openActionModal({ title, message, actions, option, alert, buildResult }) {
+function openActionModal({ title, message, messageHtml, actions, option, alert, buildResult }) {
   if (!autoStartModal) {
     return Promise.resolve(null);
   }
@@ -756,7 +786,7 @@ function openActionModal({ title, message, actions, option, alert, buildResult }
 
   resetActionModalButtons();
   autoStartTitle.textContent = title;
-  autoStartMessage.textContent = message;
+  setActionModalMessageContent({ text: message, html: messageHtml });
   currentModalActions = actions || [];
   modalResultBuilder = typeof buildResult === 'function' ? buildResult : null;
   const buttonSlots = currentModalActions.length <= 2
@@ -850,17 +880,46 @@ function setPromptDismissed(storageKey, dismissed) {
   }
 }
 
-function getDismissedContributionContentPromptVersion() {
-  return String(localStorage.getItem(CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY) || '').trim();
+function isNewUserGuidePromptDismissed() {
+  return isPromptDismissed(NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY);
 }
 
-function setDismissedContributionContentPromptVersion(version) {
-  const normalized = String(version || '').trim();
-  if (normalized) {
-    localStorage.setItem(CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY, normalized);
-  } else {
-    localStorage.removeItem(CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY);
+function setNewUserGuidePromptDismissed(dismissed) {
+  setPromptDismissed(NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
+function shouldPromptNewUserGuide() {
+  if (isNewUserGuidePromptDismissed()) {
+    return false;
   }
+  return true;
+}
+
+function openNewUserGuidePrompt() {
+  return openActionModal({
+    title: '新手引导',
+    message: '如果你是第一次使用，可以先查看使用教程。',
+    alert: {
+      text: '本提示仅出现一次。',
+    },
+    actions: [
+      { id: null, label: '取消', variant: 'btn-ghost' },
+      { id: 'confirm', label: '查看引导', variant: 'btn-primary' },
+    ],
+  });
+}
+
+async function maybeShowNewUserGuidePrompt() {
+  if (!shouldPromptNewUserGuide()) {
+    return false;
+  }
+
+  setNewUserGuidePromptDismissed(true);
+  const choice = await openNewUserGuidePrompt();
+  if (choice === 'confirm') {
+    return true;
+  }
+  return false;
 }
 
 function isAutoSkipFailuresPromptDismissed() {
@@ -911,23 +970,18 @@ async function openAutoRunFallbackRiskConfirmModal(totalRuns) {
 
 function updateConfigMenuControls() {
   const disabled = configActionInFlight || settingsSaveInFlight;
-  const contributionModeEnabled = Boolean(latestState?.contributionMode);
-  if (contributionModeEnabled && configMenuOpen) {
-    configMenuOpen = false;
-  }
   const importLocked = disabled
-    || contributionModeEnabled
     || currentAutoRun.autoRunning
     || Object.values(getStepStatuses()).some((status) => status === 'running');
   if (btnConfigMenu) {
-    btnConfigMenu.disabled = disabled || contributionModeEnabled;
+    btnConfigMenu.disabled = disabled;
     btnConfigMenu.setAttribute('aria-expanded', String(configMenuOpen));
   }
   if (configMenu) {
-    configMenu.hidden = contributionModeEnabled || !configMenuOpen;
+    configMenu.hidden = !configMenuOpen;
   }
   if (btnExportSettings) {
-    btnExportSettings.disabled = disabled || contributionModeEnabled;
+    btnExportSettings.disabled = disabled;
   }
   if (btnImportSettings) {
     btnImportSettings.disabled = importLocked;
@@ -1010,12 +1064,6 @@ function hasSavedProgress(state = latestState) {
   return Object.values(statuses).some((status) => status !== 'pending');
 }
 
-function isContributionModeSwitchBlocked(state = latestState) {
-  const statuses = getStepStatuses(state);
-  const anyRunning = Object.values(statuses).some((status) => status === 'running');
-  return anyRunning || isAutoRunLockedPhase() || isAutoRunPausedPhase() || isAutoRunScheduledPhase();
-}
-
 function shouldOfferAutoModeChoice(state = latestState) {
   return hasSavedProgress(state) && getFirstUnfinishedStep(state) !== null;
 }
@@ -1066,20 +1114,6 @@ function syncAutoRunState(source = {}) {
     countdownTitle: readAutoRunStateValue(source, ['autoRunCountdownTitle', 'countdownTitle'], currentAutoRun.countdownTitle),
     countdownNote: readAutoRunStateValue(source, ['autoRunCountdownNote', 'countdownNote'], currentAutoRun.countdownNote),
   };
-}
-
-function isContributionButtonLocked() {
-  const autoActive = currentAutoRun.autoRunning
-    || isAutoRunLockedPhase()
-    || isAutoRunPausedPhase()
-    || isAutoRunScheduledPhase();
-  if (autoActive) {
-    return false;
-  }
-
-  const statuses = getStepStatuses();
-  const anyRunning = Object.values(statuses).some((status) => status === 'running');
-  return anyRunning;
 }
 
 function isAutoRunLockedPhase() {
@@ -1198,6 +1232,423 @@ function formatCountdown(remainingMs) {
   const seconds = totalSeconds % 60;
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
+
+function normalizeHeroSmsBaseUrlValue(rawValue = '') {
+  const value = String(rawValue || '').trim();
+  if (!value) return DEFAULT_HERO_SMS_BASE_URL;
+
+  const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    parsed.search = '';
+    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return DEFAULT_HERO_SMS_BASE_URL;
+  }
+}
+
+function normalizeHeroSmsServiceValue(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeHeroSmsCountryValue(value = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue || !/^\d+$/.test(rawValue)) {
+    return '';
+  }
+  return String(Math.max(0, Number(rawValue)));
+}
+
+function normalizeHeroSmsActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const acquiredAt = Number(value.acquiredAt) || Date.now();
+  const expiresAt = Number(value.expiresAt) || acquiredAt;
+  return {
+    activationId,
+    phoneNumber,
+    service: normalizeHeroSmsServiceValue(value.service),
+    country: normalizeHeroSmsCountryValue(value.country),
+    acquiredAt,
+    expiresAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    lastCode: String(value.lastCode || '').trim(),
+    lastStatus: String(value.lastStatus || '').trim(),
+    resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
+  };
+}
+
+function normalizeHeroSmsActiveActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(
+    value.activationId
+    ?? value.activation_id
+    ?? value.id
+    ?? value.orderId
+    ?? value.order_id
+  );
+  if (!Number.isInteger(activationId) || activationId <= 0) {
+    return null;
+  }
+
+  const acquiredAt = Number(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? 0
+  ) || Date.parse(
+    value.acquiredAt
+    ?? value.createdAt
+    ?? value.created_at
+    ?? value.activationTime
+    ?? value.createDate
+    ?? ''
+  ) || 0;
+  const expiresAt = Number(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? 0
+  ) || Date.parse(
+    value.expiresAt
+    ?? value.expiredAt
+    ?? value.expires_at
+    ?? value.expired_at
+    ?? value.estDate
+    ?? value.finishDate
+    ?? ''
+  ) || 0;
+
+  return {
+    activationId,
+    phoneNumber: String(value.phoneNumber ?? value.phone_number ?? value.number ?? value.phone ?? value.msisdn ?? '').trim(),
+    service: normalizeHeroSmsServiceValue(value.service ?? value.serviceCode ?? value.service_code),
+    country: normalizeHeroSmsCountryValue(value.country ?? value.countryCode ?? value.country_code ?? value.countryId ?? value.country_id),
+    status: String(value.status ?? value.state ?? value.activationStatus ?? '').trim(),
+    acquiredAt,
+    expiresAt,
+    smsCode: String(value.smsCode ?? value.code ?? '').trim(),
+    smsText: String(value.smsText ?? value.text ?? '').trim(),
+    cost: String(value.activationCost ?? value.cost ?? '').trim(),
+  };
+}
+
+function normalizeHeroSmsFailedActivationState(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const activationId = Number(value.activationId ?? value.activation_id ?? value.id);
+  const phoneNumber = String(value.phoneNumber ?? value.number ?? value.phone ?? '').trim();
+  if (!Number.isInteger(activationId) || activationId <= 0 || !phoneNumber) {
+    return null;
+  }
+
+  const failedAt = Number(value.failedAt) || 0;
+  const cleanupAt = Number(value.cleanupAt) || 0;
+  return {
+    activationId,
+    phoneNumber,
+    failedAt,
+    cleanupAt,
+    useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
+    reason: String(value.reason || '').trim(),
+    errorText: String(value.errorText || '').trim(),
+    status: String(value.status || 'scheduled').trim() || 'scheduled',
+    cleanupResponse: String(value.cleanupResponse || '').trim(),
+    cleanupError: String(value.cleanupError || '').trim(),
+    cleanupAttemptedAt: Number(value.cleanupAttemptedAt) || 0,
+    cleanupCompletedAt: Number(value.cleanupCompletedAt) || 0,
+  };
+}
+
+function getHeroSmsFailedActivationList(state = latestState) {
+  if (!Array.isArray(state?.heroSmsFailedActivations)) {
+    return [];
+  }
+
+  return state.heroSmsFailedActivations
+    .map((item) => normalizeHeroSmsFailedActivationState(item))
+    .filter(Boolean)
+    .sort((left, right) => (right.failedAt || 0) - (left.failedAt || 0));
+}
+
+function getHeroSmsActiveActivationList(state = latestState) {
+  if (!Array.isArray(state?.heroSmsActiveActivations)) {
+    return [];
+  }
+
+  return state.heroSmsActiveActivations
+    .map((item) => normalizeHeroSmsActiveActivationState(item))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftTime = left.acquiredAt || left.activationId || 0;
+      const rightTime = right.acquiredAt || right.activationId || 0;
+      return rightTime - leftTime;
+    });
+}
+
+function getHeroSmsActivationRemainingMs(activation, now = Date.now()) {
+  const normalized = normalizeHeroSmsActivationState(activation);
+  if (!normalized) return 0;
+  return Math.max(0, normalized.expiresAt - now);
+}
+
+function getCurrentHeroSmsActivation(state = latestState) {
+  return normalizeHeroSmsActivationState(state?.currentHeroSmsActivation);
+}
+
+function updateHeroSmsResendButtonState() {
+  if (!btnHeroSmsResend) {
+    return;
+  }
+  btnHeroSmsResend.disabled = heroSmsActionInFlight || heroSmsAutoReleaseInFlight || !getCurrentHeroSmsActivation();
+  btnHeroSmsResend.textContent = heroSmsActionInFlight ? '请求中' : '重新获取验证码';
+}
+
+function updateHeroSmsActiveRefreshButtonState() {
+  if (!btnHeroSmsRefreshActive) {
+    return;
+  }
+
+  btnHeroSmsRefreshActive.disabled = heroSmsActiveRefreshInFlight;
+  btnHeroSmsRefreshActive.textContent = heroSmsActiveRefreshInFlight ? '刷新中' : '刷新';
+}
+
+function maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs) {
+  if (!activation || remainingMs > 0 || heroSmsAutoReleaseInFlight) {
+    return;
+  }
+
+  const releaseKey = `${activation.activationId}:${activation.expiresAt}`;
+  if (heroSmsAutoReleaseKey === releaseKey) {
+    return;
+  }
+
+  heroSmsAutoReleaseKey = releaseKey;
+  heroSmsAutoReleaseInFlight = true;
+  chrome.runtime.sendMessage({
+    type: 'HERO_SMS_RELEASE_NUMBER',
+    source: 'sidepanel',
+    payload: {
+      preferComplete: activation.useCount >= HERO_SMS_NUMBER_MAX_USES,
+      releaseReason: 'expired_in_sidepanel',
+    },
+  }).catch((err) => {
+    heroSmsAutoReleaseKey = '';
+    console.warn('[SidePanel] HeroSMS auto release failed:', err?.message || err);
+  }).finally(() => {
+    heroSmsAutoReleaseInFlight = false;
+  });
+}
+
+async function refreshHeroSmsActiveActivations(options = {}) {
+  if (heroSmsActiveRefreshInFlight) {
+    return null;
+  }
+
+  heroSmsActiveRefreshInFlight = true;
+  updateHeroSmsActiveRefreshButtonState();
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'HERO_SMS_REFRESH_ACTIVE_ACTIVATIONS',
+      source: 'sidepanel',
+      payload: {},
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+
+    if (response?.activations !== undefined) {
+      latestState = {
+        ...latestState,
+        heroSmsActiveActivations: Array.isArray(response.activations) ? response.activations : [],
+        heroSmsActiveActivationsFetchedAt: Number(response.fetchedAt) || Date.now(),
+      };
+      renderHeroSmsPanel(latestState);
+    }
+
+    if (!options.silent) {
+      showToast(`已同步 ${Array.isArray(response?.activations) ? response.activations.length : 0} 个活跃号码。`, 'success', 1800);
+    }
+    return response;
+  } catch (err) {
+    if (!options.silent) {
+      showToast(`刷新活跃号码失败：${err.message}`, 'error');
+    }
+    throw err;
+  } finally {
+    heroSmsActiveRefreshInFlight = false;
+    updateHeroSmsActiveRefreshButtonState();
+  }
+}
+
+function formatHeroSmsFailedActivationStatus(item) {
+  switch (item?.status) {
+    case 'scheduled':
+      return '等待清理';
+    case 'cancelled':
+      return '已取消';
+    case 'completed':
+      return '已完成激活';
+    case 'cleanup_failed':
+      return '清理失败';
+    default:
+      return item?.status || '未知';
+  }
+}
+
+function formatHeroSmsActiveActivationStatus(item) {
+  const normalized = String(item?.status || '').trim();
+  if (!normalized) {
+    return 'ACTIVE';
+  }
+  if (normalized === '2') {
+    return '已收码';
+  }
+  if (normalized === '1') {
+    return '等待短信';
+  }
+  if (normalized === '3') {
+    return '已取消';
+  }
+  return normalized;
+}
+
+function renderHeroSmsActiveActivationList(state = latestState) {
+  if (!heroSmsActiveList) {
+    return;
+  }
+
+  const items = getHeroSmsActiveActivationList(state);
+  if (displayHeroSmsActiveCount) {
+    displayHeroSmsActiveCount.textContent = String(items.length);
+  }
+
+  if (!items.length) {
+    heroSmsActiveList.innerHTML = '<div class="hero-sms-failed-empty">暂无活跃号码记录。</div>';
+    return;
+  }
+
+  heroSmsActiveList.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'hero-sms-failed-item';
+    const remainingMs = item.expiresAt ? Math.max(0, item.expiresAt - Date.now()) : 0;
+    const remainingText = item.expiresAt
+      ? (remainingMs > 0 ? formatCountdown(remainingMs) : '即将到期')
+      : '未知';
+    const receivedText = item.acquiredAt ? formatScheduleTime(item.acquiredAt) : '未知';
+    const smsSummary = item.smsCode
+      ? `验证码 ${item.smsCode}${item.smsText ? ` · ${item.smsText}` : ''}`
+      : (item.smsText || '等待短信');
+
+    row.innerHTML = `
+      <div class="hero-sms-failed-meta">
+        <span class="hero-sms-failed-phone mono">${item.phoneNumber || '未知号码'}</span>
+        <span class="hero-sms-failed-status">${formatHeroSmsActiveActivationStatus(item)}</span>
+      </div>
+      <div class="hero-sms-failed-detail mono">ID ${item.activationId} · 剩余 ${remainingText}</div>
+      <div class="hero-sms-failed-detail">${item.service || 'unknown service'}${item.country ? ` · 国家 ${item.country}` : ''}${item.cost ? ` · 费用 ${item.cost}` : ''}</div>
+      <div class="hero-sms-failed-detail">${smsSummary}</div>
+      <div class="hero-sms-failed-detail mono">创建时间 ${receivedText}</div>
+    `;
+    heroSmsActiveList.appendChild(row);
+  });
+}
+
+function renderHeroSmsFailedActivationList(state = latestState) {
+  if (!heroSmsFailedList) {
+    return;
+  }
+
+  const items = getHeroSmsFailedActivationList(state);
+  if (displayHeroSmsFailedCount) {
+    displayHeroSmsFailedCount.textContent = String(items.length);
+  }
+
+  if (!items.length) {
+    heroSmsFailedList.innerHTML = '<div class="hero-sms-failed-empty">暂无失败号码记录。</div>';
+    return;
+  }
+
+  heroSmsFailedList.innerHTML = '';
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'hero-sms-failed-item';
+
+    const now = Date.now();
+    const cleanupCountdown = item.cleanupCompletedAt
+      ? '已处理'
+      : (item.cleanupAt > now ? formatCountdown(item.cleanupAt - now) : '处理中');
+
+    row.innerHTML = `
+      <div class="hero-sms-failed-meta">
+        <span class="hero-sms-failed-phone mono">${item.phoneNumber}</span>
+        <span class="hero-sms-failed-status">${formatHeroSmsFailedActivationStatus(item)}</span>
+      </div>
+      <div class="hero-sms-failed-detail mono">ID ${item.activationId} · 2分钟清理 ${cleanupCountdown}</div>
+      <div class="hero-sms-failed-detail">${item.reason || 'unknown'}${item.useCount ? ` · 已用 ${item.useCount} 次` : ''}</div>
+      <div class="hero-sms-failed-detail">${item.cleanupError || item.cleanupResponse || item.errorText || '等待后台清理线程执行'}</div>
+    `;
+    heroSmsFailedList.appendChild(row);
+  });
+}
+
+function renderHeroSmsPanel(state = latestState) {
+  if (!heroSmsSection) {
+    return;
+  }
+
+  const activation = getCurrentHeroSmsActivation(state);
+  const remainingMs = getHeroSmsActivationRemainingMs(activation);
+  const lastCode = String(state?.heroSmsLastCode || activation?.lastCode || '').trim();
+  const runtimeStatus = String(state?.heroSmsRuntimeStatus || '').trim();
+
+  if (displayHeroSmsPhone) {
+    displayHeroSmsPhone.textContent = activation?.phoneNumber || '等待进入手机号页面';
+  }
+  if (displayHeroSmsRemaining) {
+    displayHeroSmsRemaining.textContent = activation
+      ? (remainingMs > 0 ? formatCountdown(remainingMs) : '已到期')
+      : (runtimeStatus ? '等待分配' : '未分配');
+  }
+  if (displayHeroSmsUsage) {
+    displayHeroSmsUsage.textContent = `${activation?.useCount || 0}/${HERO_SMS_NUMBER_MAX_USES}`;
+  }
+  if (displayHeroSmsCode) {
+    displayHeroSmsCode.textContent = lastCode || '等待中';
+  }
+  if (displayHeroSmsStatus) {
+    displayHeroSmsStatus.textContent = runtimeStatus || activation?.lastStatus || (activation ? '等待短信' : '未开始');
+  }
+
+  maybeAutoReleaseExpiredHeroSmsActivation(activation, remainingMs);
+  renderHeroSmsActiveActivationList(state);
+  updateHeroSmsResendButtonState();
+  updateHeroSmsActiveRefreshButtonState();
+  renderHeroSmsFailedActivationList(state);
+}
+
+
 
 function formatScheduleTime(timestamp) {
   return new Date(timestamp).toLocaleString('zh-CN', {
@@ -1456,6 +1907,18 @@ function setCloudflareTempEmailDomainEditMode(editing, options = {}) {
   }
 }
 
+function applyCloudflareTempEmailSettingsState(state = {}) {
+  inputTempEmailBaseUrl.value = state?.cloudflareTempEmailBaseUrl || '';
+  inputTempEmailAdminAuth.value = state?.cloudflareTempEmailAdminAuth || '';
+  inputTempEmailCustomAuth.value = state?.cloudflareTempEmailCustomAuth || '';
+  inputTempEmailReceiveMailbox.value = state?.cloudflareTempEmailReceiveMailbox || '';
+  if (inputTempEmailUseRandomSubdomain) {
+    inputTempEmailUseRandomSubdomain.checked = Boolean(state?.cloudflareTempEmailUseRandomSubdomain);
+  }
+  renderCloudflareTempEmailDomainOptions(state?.cloudflareTempEmailDomain || '');
+  setCloudflareTempEmailDomainEditMode(false, { clearInput: true });
+}
+
 function collectSettingsPayload() {
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
@@ -1465,7 +1928,6 @@ function collectSettingsPayload() {
   const selectedCloudflareTempEmailDomain = normalizeCloudflareTempEmailDomainValue(
     !cloudflareTempEmailDomainEditMode ? selectTempEmailDomain.value : tempEmailActiveDomain
   ) || tempEmailActiveDomain;
-  const contributionModeEnabled = Boolean(latestState?.contributionMode);
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
     ? Boolean(inputMail2925UseAccountPool?.checked)
     : Boolean(latestState?.mail2925UseAccountPool);
@@ -1479,9 +1941,9 @@ function collectSettingsPayload() {
     sub2apiPassword: inputSub2ApiPassword.value,
     sub2apiGroupName: inputSub2ApiGroup.value.trim(),
     sub2apiDefaultProxyName: inputSub2ApiDefaultProxy.value.trim(),
-    ...(contributionModeEnabled ? {} : {
-      customPassword: inputPassword.value,
-    }),
+    codex2apiUrl: inputCodex2ApiUrl.value.trim(),
+    codex2apiAdminKey: inputCodex2ApiAdminKey.value.trim(),
+    customPassword: inputPassword.value,
     mailProvider: selectMailProvider.value,
     mail2925Mode: getSelectedMail2925Mode(),
     mail2925UseAccountPool,
@@ -1489,16 +1951,18 @@ function collectSettingsPayload() {
     emailGenerator: selectEmailGenerator.value,
     autoDeleteUsedIcloudAlias: checkboxAutoDeleteIcloud?.checked,
     icloudHostPreference: selectIcloudHostPreference?.value || 'auto',
-    ...(contributionModeEnabled ? {} : {
-      accountRunHistoryTextEnabled: Boolean(inputAccountRunHistoryTextEnabled?.checked),
-      accountRunHistoryHelperBaseUrl: normalizeAccountRunHistoryHelperBaseUrlValue(inputAccountRunHistoryHelperBaseUrl?.value),
-    }),
+    accountRunHistoryTextEnabled: Boolean(inputAccountRunHistoryTextEnabled?.checked),
+    accountRunHistoryHelperBaseUrl: normalizeAccountRunHistoryHelperBaseUrlValue(inputAccountRunHistoryHelperBaseUrl?.value),
     ...buildManagedAliasBaseEmailPayload(),
     inbucketHost: inputInbucketHost.value.trim(),
     inbucketMailbox: inputInbucketMailbox.value.trim(),
     hotmailServiceMode: getSelectedHotmailServiceMode(),
     hotmailRemoteBaseUrl: inputHotmailRemoteBaseUrl.value.trim(),
     hotmailLocalBaseUrl: inputHotmailLocalBaseUrl.value.trim(),
+    heroSmsBaseUrl: normalizeHeroSmsBaseUrlValue(inputHeroSmsBaseUrl.value),
+    heroSmsApiKey: inputHeroSmsApiKey.value,
+    heroSmsService: normalizeHeroSmsServiceValue(inputHeroSmsService.value),
+    heroSmsCountry: normalizeHeroSmsCountryValue(inputHeroSmsCountry.value),
     luckmailApiKey: inputLuckmailApiKey.value,
     luckmailBaseUrl: normalizeLuckmailBaseUrl(inputLuckmailBaseUrl.value),
     luckmailEmailType: normalizeLuckmailEmailType(selectLuckmailEmailType.value),
@@ -1509,6 +1973,7 @@ function collectSettingsPayload() {
     cloudflareTempEmailAdminAuth: inputTempEmailAdminAuth.value,
     cloudflareTempEmailCustomAuth: inputTempEmailCustomAuth.value,
     cloudflareTempEmailReceiveMailbox: normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value),
+    cloudflareTempEmailUseRandomSubdomain: Boolean(inputTempEmailUseRandomSubdomain?.checked),
     cloudflareTempEmailDomain: selectedCloudflareTempEmailDomain,
     cloudflareTempEmailDomains: tempEmailDomains,
     autoRunSkipFailures: inputAutoSkipFailures.checked,
@@ -1617,7 +2082,7 @@ function updateAccountRunHistorySettingsUI() {
     return;
   }
 
-  rowAccountRunHistoryHelperBaseUrl.style.display = inputAccountRunHistoryTextEnabled.checked && !latestState?.contributionMode
+  rowAccountRunHistoryHelperBaseUrl.style.display = inputAccountRunHistoryTextEnabled.checked
     ? ''
     : 'none';
 }
@@ -1790,7 +2255,6 @@ function applyAutoRunStatus(payload = currentAutoRun) {
   syncScheduledCountdownTicker();
   updateStopButtonState(scheduled || paused || locked || Object.values(getStepStatuses()).some(status => status === 'running'));
   updateConfigMenuControls();
-  renderContributionMode();
 }
 
 function initializeManualStepActions() {
@@ -1859,6 +2323,8 @@ function applySettingsState(state) {
   inputSub2ApiPassword.value = state?.sub2apiPassword || '';
   inputSub2ApiGroup.value = state?.sub2apiGroupName || '';
   inputSub2ApiDefaultProxy.value = state?.sub2apiDefaultProxyName || '';
+  inputCodex2ApiUrl.value = state?.codex2apiUrl || '';
+  inputCodex2ApiAdminKey.value = state?.codex2apiAdminKey || '';
   const restoredMailProvider = isCustomMailProvider(state?.mailProvider)
     || [ICLOUD_PROVIDER, 'hotmail-api', GMAIL_PROVIDER, 'luckmail-api', '163', '163-vip', 'qq', 'inbucket', '2925', 'cloudflare-temp-email'].includes(String(state?.mailProvider || '').trim())
     ? String(state?.mailProvider || '163').trim()
@@ -1894,12 +2360,6 @@ function applySettingsState(state) {
   if (inputAccountRunHistoryHelperBaseUrl) {
     inputAccountRunHistoryHelperBaseUrl.value = normalizeAccountRunHistoryHelperBaseUrlValue(state?.accountRunHistoryHelperBaseUrl);
   }
-  if (inputContributionNickname) {
-    inputContributionNickname.value = state?.contributionNickname || '';
-  }
-  if (inputContributionQq) {
-    inputContributionQq.value = state?.contributionQq || '';
-  }
   if (inputMail2925UseAccountPool) {
     inputMail2925UseAccountPool.checked = Boolean(state?.mail2925UseAccountPool);
   }
@@ -1909,18 +2369,17 @@ function applySettingsState(state) {
   setHotmailServiceMode(state?.hotmailServiceMode);
   inputHotmailRemoteBaseUrl.value = state?.hotmailRemoteBaseUrl || '';
   inputHotmailLocalBaseUrl.value = state?.hotmailLocalBaseUrl || '';
+  inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(state?.heroSmsBaseUrl);
+  inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
+  inputHeroSmsService.value = state?.heroSmsService || '';
+  inputHeroSmsCountry.value = state?.heroSmsCountry || '';
   inputLuckmailApiKey.value = state?.luckmailApiKey || '';
   inputLuckmailBaseUrl.value = normalizeLuckmailBaseUrl(state?.luckmailBaseUrl);
   selectLuckmailEmailType.value = normalizeLuckmailEmailType(state?.luckmailEmailType);
   inputLuckmailDomain.value = state?.luckmailDomain || '';
-  inputTempEmailBaseUrl.value = state?.cloudflareTempEmailBaseUrl || '';
-  inputTempEmailAdminAuth.value = state?.cloudflareTempEmailAdminAuth || '';
-  inputTempEmailCustomAuth.value = state?.cloudflareTempEmailCustomAuth || '';
-  inputTempEmailReceiveMailbox.value = state?.cloudflareTempEmailReceiveMailbox || '';
+  applyCloudflareTempEmailSettingsState(state);
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
-  renderCloudflareTempEmailDomainOptions(state?.cloudflareTempEmailDomain || '');
-  setCloudflareTempEmailDomainEditMode(false, { clearInput: true });
   inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
@@ -1948,6 +2407,7 @@ function applySettingsState(state) {
   if (isLuckmailProvider(state?.mailProvider)) {
     queueLuckmailPurchaseRefresh();
   }
+  renderHeroSmsPanel(state);
   updateButtonStates();
 }
 
@@ -1981,7 +2441,9 @@ async function restoreState() {
 
     updateStatusDisplay(latestState);
     updateProgressCounter();
-    renderContributionMode();
+    if (latestState?.heroSmsApiKey && normalizeHeroSmsBaseUrlValue(latestState?.heroSmsBaseUrl || '')) {
+      refreshHeroSmsActiveActivations({ silent: true }).catch(() => { });
+    }
   } catch (err) {
     console.error('Failed to restore state:', err);
   }
@@ -2037,6 +2499,51 @@ function openRepositoryHomePage() {
 
 function openReleaseListPage() {
   openExternalUrl(getReleaseListUrl());
+}
+
+function buildCloudflareTempEmailUsageGuideModalConfig() {
+  const useCloudflareTempEmailProvider = String(selectMailProvider?.value || '').trim().toLowerCase() === 'cloudflare-temp-email';
+  const useCloudflareTempEmailGenerator = getSelectedEmailGenerator() === 'cloudflare-temp-email';
+  let alertText = '当前还没有把 Cloudflare Temp Email 选为邮箱服务或邮箱生成器。下面说明同时覆盖“生成邮箱”和“接收转发邮件”两种用法。';
+  if (useCloudflareTempEmailProvider && useCloudflareTempEmailGenerator) {
+    alertText = '当前同时把 Cloudflare Temp Email 用作“邮箱服务”和“邮箱生成器”。请同时配置生成邮箱和接收转发两套必填项。';
+  } else if (useCloudflareTempEmailProvider) {
+    alertText = '当前把 Cloudflare Temp Email 用作“邮箱服务”。重点填写 Temp API、Custom Auth 和 邮件接收。';
+  } else if (useCloudflareTempEmailGenerator) {
+    alertText = '当前把 Cloudflare Temp Email 用作“邮箱生成器”。重点填写 Temp API、Admin Auth 和 Temp 域名；随机子域按需开启。';
+  }
+
+  return {
+    title: 'Cloudflare Temp Email 使用教程',
+    alert: { text: alertText },
+    messageHtml: `Temp API：填写 Cloudflare Temp Email 后端地址。<br><br>
+Admin Auth：填写后端 admin auth。<br>
+仅在“邮箱生成 = Cloudflare Temp Email”时必填。<br><br>
+Custom Auth：仅当站点额外开启访问密码时填写。没有开启就留空。<br><br>
+Temp 域名：填写允许创建的基础域名。启用随机子域时，这里仍然填写基础域名。<br><br>
+随机子域：仅在“邮箱生成 = Cloudflare Temp Email”时使用。<br>
+后端需要已配置 RANDOM_SUBDOMAIN_DOMAINS。<br>
+CF DNS 需要设置 MX *，参考 <a href="${CLOUDFLARE_TEMP_EMAIL_RANDOM_SUBDOMAIN_ISSUE_URL}" target="_blank" rel="noopener noreferrer">Issue #942</a>。<br><br>
+邮件接收：仅在“邮箱服务 = Cloudflare Temp Email”时填写。<br>
+这里填写真正接收转发邮件的目标邮箱。<br><br>
+搭建教程：<a href="${CLOUDFLARE_TEMP_EMAIL_BUILD_TUTORIAL_URL}" target="_blank" rel="noopener noreferrer">LINUX DO 教程</a>。`,
+  };
+}
+
+function showCloudflareTempEmailUsageGuide() {
+  const modalConfig = buildCloudflareTempEmailUsageGuideModalConfig();
+  return openActionModal({
+    title: modalConfig.title,
+    messageHtml: modalConfig.messageHtml,
+    alert: modalConfig.alert,
+    actions: [
+      { id: 'ok', label: '知道了', variant: 'btn-primary' },
+    ],
+  });
+}
+
+function openCloudflareTempEmailRepositoryPage() {
+  openExternalUrl(CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL);
 }
 
 function createUpdateNoteList(notes = []) {
@@ -2231,120 +2738,8 @@ async function initializeReleaseInfo() {
   renderReleaseSnapshot(snapshot);
 }
 
-function getContributionUpdateHintMessage(snapshot = currentContributionContentSnapshot) {
-  if (!snapshot?.promptVersion) {
-    return '';
-  }
-
-  return '公告 / 使用教程有更新了，可点上方“贡献/使用”查看。';
-}
-
-function positionContributionUpdateHint() {
-  if (!contributionUpdateLayer || !contributionUpdateHint || !btnContributionMode) {
-    return;
-  }
-  if (contributionUpdateLayer.hidden || contributionUpdateHint.hidden) {
-    return;
-  }
-
-  const buttonRect = btnContributionMode.getBoundingClientRect();
-  const viewportWidth = Math.max(document.documentElement?.clientWidth || 0, window.innerWidth || 0);
-  const viewportHeight = Math.max(document.documentElement?.clientHeight || 0, window.innerHeight || 0);
-  const hintWidth = contributionUpdateHint.offsetWidth || 220;
-  const hintHeight = contributionUpdateHint.offsetHeight || 56;
-  const viewportPadding = 12;
-  const gap = 10;
-
-  const maxLeft = Math.max(viewportPadding, viewportWidth - hintWidth - viewportPadding);
-  const left = Math.min(Math.max(viewportPadding, Math.round(buttonRect.left)), maxLeft);
-  const shouldPlaceAbove = (buttonRect.bottom + gap + hintHeight) > (viewportHeight - viewportPadding)
-    && buttonRect.top > (hintHeight + gap + viewportPadding);
-  const top = shouldPlaceAbove
-    ? Math.max(viewportPadding, Math.round(buttonRect.top - hintHeight - gap))
-    : Math.max(viewportPadding, Math.round(buttonRect.bottom + gap));
-  const buttonCenter = Math.round(buttonRect.left + (buttonRect.width / 2));
-  const arrowOffset = Math.min(Math.max(16, buttonCenter - left), Math.max(16, hintWidth - 16));
-
-  contributionUpdateHint.style.left = `${left}px`;
-  contributionUpdateHint.style.top = `${top}px`;
-  contributionUpdateHint.style.setProperty('--contribution-update-arrow-left', `${arrowOffset}px`);
-}
-
-function shouldShowContributionUpdateHint(snapshot = currentContributionContentSnapshot) {
-  const promptVersion = String(snapshot?.promptVersion || '').trim();
-  if (!contributionUpdateLayer || !contributionUpdateHint || !contributionUpdateHintText || !btnContributionMode) {
-    return false;
-  }
-  if (!promptVersion) {
-    return false;
-  }
-  if (promptVersion === getDismissedContributionContentPromptVersion()) {
-    return false;
-  }
-  if (latestState?.contributionMode) {
-    return false;
-  }
-  return !btnContributionMode.disabled;
-}
-
-function renderContributionUpdateHint(snapshot = currentContributionContentSnapshot) {
-  if (!contributionUpdateLayer || !contributionUpdateHint) {
-    return;
-  }
-
-  const visible = shouldShowContributionUpdateHint(snapshot);
-  contributionUpdateLayer.hidden = !visible;
-  contributionUpdateHint.hidden = !visible;
-  if (!visible || !contributionUpdateHintText) {
-    return;
-  }
-
-  contributionUpdateHintText.textContent = getContributionUpdateHintMessage(snapshot);
-  if (typeof window.requestAnimationFrame === 'function') {
-    window.requestAnimationFrame(() => positionContributionUpdateHint());
-    return;
-  }
-  positionContributionUpdateHint();
-}
-
-function dismissContributionUpdateHint() {
-  const promptVersion = String(currentContributionContentSnapshot?.promptVersion || '').trim();
-  if (promptVersion) {
-    setDismissedContributionContentPromptVersion(promptVersion);
-  }
-  renderContributionUpdateHint();
-}
-
-async function refreshContributionContentHint() {
-  if (!contributionContentService?.getContentUpdateSnapshot) {
-    currentContributionContentSnapshot = null;
-    renderContributionUpdateHint();
-    return null;
-  }
-  if (contributionContentSnapshotRequestInFlight) {
-    return contributionContentSnapshotRequestInFlight;
-  }
-
-  contributionContentSnapshotRequestInFlight = contributionContentService.getContentUpdateSnapshot()
-    .then((snapshot) => {
-      currentContributionContentSnapshot = snapshot;
-      renderContributionUpdateHint(snapshot);
-      return snapshot;
-    })
-    .catch((error) => {
-      currentContributionContentSnapshot = null;
-      renderContributionUpdateHint(null);
-      throw error;
-    })
-    .finally(() => {
-      contributionContentSnapshotRequestInFlight = null;
-    });
-
-  return contributionContentSnapshotRequestInFlight;
-}
-
 function syncPasswordField(state) {
-  inputPassword.value = state?.contributionMode ? '' : (state.customPassword || state.password || '');
+  inputPassword.value = state.customPassword || state.password || '';
 }
 
 function isCustomMailProvider(provider = selectMailProvider.value) {
@@ -2673,9 +3068,13 @@ function updateMailProviderUI() {
   const showCloudflareDomain = useEmailGenerator && useCloudflare;
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
   const showCloudflareTempEmailReceiveMailbox = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
+  const showCloudflareTempEmailRandomSubdomainToggle = useEmailGenerator && useCloudflareTempEmailGenerator;
   const showCloudflareTempEmailDomain = useEmailGenerator && useCloudflareTempEmailGenerator;
   if (rowEmailGenerator) {
     rowEmailGenerator.style.display = useEmailGenerator ? '' : 'none';
+  }
+  if (cloudflareTempEmailSection) {
+    cloudflareTempEmailSection.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   }
   if (icloudSection) {
     const showIcloudSection = (useEmailGenerator && useIcloud) || useIcloudProvider;
@@ -2698,6 +3097,9 @@ function updateMailProviderUI() {
   rowTempEmailAdminAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailCustomAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailReceiveMailbox.style.display = showCloudflareTempEmailReceiveMailbox ? '' : 'none';
+  if (rowTempEmailRandomSubdomainToggle) {
+    rowTempEmailRandomSubdomainToggle.style.display = showCloudflareTempEmailRandomSubdomainToggle ? '' : 'none';
+  }
   rowTempEmailDomain.style.display = showCloudflareTempEmailDomain ? '' : 'none';
   const { domains: tempEmailDomains } = getCloudflareTempEmailDomainsFromState();
   if (showCloudflareTempEmailDomain) {
@@ -2785,6 +3187,9 @@ function updateMailProviderUI() {
   if (autoHintText && showCloudflareTempEmailReceiveMailbox) {
     autoHintText.textContent = '若注册邮箱会转发到 Cloudflare Temp Email，请在“邮件接收”中填写实际接收转发邮件的邮箱。';
   }
+  if (autoHintText && showCloudflareTempEmailRandomSubdomainToggle && inputTempEmailUseRandomSubdomain?.checked) {
+    autoHintText.textContent = '已启用随机子域名：扩展会按当前选中的 Temp 域名提交，并额外携带 enableRandomSubdomain；是否生效取决于后端 RANDOM_SUBDOMAIN_DOMAINS 配置。';
+  }
   if (useHotmail) {
     inputEmail.value = getCurrentHotmailEmail();
   } else if (useLuckmail) {
@@ -2865,18 +3270,24 @@ async function saveCloudflareTempEmailDomainSettings(domains, activeDomain, opti
 
 function updatePanelModeUI() {
   const useSub2Api = selectPanelMode.value === 'sub2api';
-  rowVpsUrl.style.display = useSub2Api ? 'none' : '';
-  rowVpsPassword.style.display = useSub2Api ? 'none' : '';
-  rowLocalCpaStep9Mode.style.display = useSub2Api ? 'none' : '';
+  const useCodex2Api = selectPanelMode.value === 'codex2api';
+  const useCpa = !useSub2Api && !useCodex2Api;
+  rowVpsUrl.style.display = useCpa ? '' : 'none';
+  rowVpsPassword.style.display = useCpa ? '' : 'none';
+  rowLocalCpaStep9Mode.style.display = useCpa ? '' : 'none';
   rowSub2ApiUrl.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiEmail.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiPassword.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiGroup.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiDefaultProxy.style.display = useSub2Api ? '' : 'none';
+  rowCodex2ApiUrl.style.display = useCodex2Api ? '' : 'none';
+  rowCodex2ApiAdminKey.style.display = useCodex2Api ? '' : 'none';
 
   const step9Btn = document.querySelector('.step-btn[data-step-key="platform-verify"]');
   if (step9Btn) {
-    step9Btn.textContent = useSub2Api ? 'SUB2API 回调验证' : 'CPA 回调验证';
+    step9Btn.textContent = useSub2Api
+      ? 'SUB2API 回调验证'
+      : (useCodex2Api ? 'Codex2API 回调验证' : 'CPA 回调验证');
   }
 }
 
@@ -2965,9 +3376,8 @@ function updateButtonStates() {
   if (btnIcloudDeleteUsed) btnIcloudDeleteUsed.disabled = disableIcloudControls || !hasDeletableUsedIcloudAliases();
   if (selectIcloudHostPreference) selectIcloudHostPreference.disabled = disableIcloudControls;
   if (checkboxAutoDeleteIcloud) checkboxAutoDeleteIcloud.disabled = disableIcloudControls;
-  if (btnContributionMode) btnContributionMode.disabled = isContributionButtonLocked();
+  updateHeroSmsResendButtonState();
   updateStopButtonState(anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked);
-  renderContributionMode();
 }
 
 function updateStopButtonState(active) {
@@ -3397,73 +3807,6 @@ const bindAccountRecordEvents = accountRecordsManager?.bindEvents
 const closeAccountRecordsPanel = accountRecordsManager?.closePanel
   || (() => { });
 bindAccountRecordEvents();
-const contributionModeManager = window.SidepanelContributionMode?.createContributionModeManager({
-  state: {
-    getLatestState: () => latestState,
-  },
-  dom: {
-    btnConfigMenu,
-    btnContributionMode,
-    inputContributionNickname,
-    inputContributionQq,
-    contributionCallbackStatus,
-    btnExitContributionMode,
-    btnOpenAccountRecords,
-    btnOpenContributionUpload,
-    btnStartContribution,
-    contributionModePanel,
-    contributionModeSummary,
-    contributionModeText,
-    contributionOauthStatus,
-    rowAccountRunHistoryHelperBaseUrl,
-    rowAccountRunHistoryTextEnabled,
-    rowCustomPassword,
-    rowLocalCpaStep9Mode,
-    rowSub2ApiDefaultProxy,
-    rowSub2ApiEmail,
-    rowSub2ApiGroup,
-    rowSub2ApiPassword,
-    rowSub2ApiUrl,
-    rowVpsPassword,
-    rowVpsUrl,
-    selectPanelMode,
-  },
-  helpers: {
-    applySettingsState,
-    closeAccountRecordsPanel,
-    closeConfigMenu,
-    getContributionNickname: () => latestState?.email || '',
-    getContributionProfile: () => ({
-      nickname: String(inputContributionNickname?.value || '').trim(),
-      qq: String(inputContributionQq?.value || '').trim(),
-    }),
-    isModeSwitchBlocked: isContributionModeSwitchBlocked,
-    openConfirmModal,
-    openExternalUrl,
-    showToast,
-    startContributionAutoRun: () => startAutoRunFromCurrentSettings(),
-    updateAccountRunHistorySettingsUI,
-    updateConfigMenuControls,
-    updatePanelModeUI,
-    updateStatusDisplay,
-  },
-  runtime: {
-    sendMessage: (message) => chrome.runtime.sendMessage(message),
-  },
-  constants: {
-    contributionOauthUrl: `${contributionContentService?.portalUrl || 'https://apikey.qzz.io'}/oauth/`,
-    contributionUploadUrl: contributionContentService?.portalUrl || 'https://apikey.qzz.io',
-  },
-});
-const baseRenderContributionMode = contributionModeManager?.render
-  || (() => { });
-const renderContributionMode = () => {
-  baseRenderContributionMode();
-  renderContributionUpdateHint();
-};
-const bindContributionModeEvents = contributionModeManager?.bindEvents
-  || (() => { });
-bindContributionModeEvents();
 renderStepsList();
 
 async function exportSettingsFile() {
@@ -3777,13 +4120,16 @@ btnRepoHome?.addEventListener('click', () => {
   openRepositoryHomePage();
 });
 
-extensionUpdateStatus?.addEventListener('click', () => {
-  openReleaseListPage();
+btnCloudflareTempEmailUsageGuide?.addEventListener('click', () => {
+  showCloudflareTempEmailUsageGuide();
 });
 
-btnDismissContributionUpdateHint?.addEventListener('click', (event) => {
-  event.stopPropagation();
-  dismissContributionUpdateHint();
+btnCloudflareTempEmailGithub?.addEventListener('click', () => {
+  openCloudflareTempEmailRepositoryPage();
+});
+
+extensionUpdateStatus?.addEventListener('click', () => {
+  openReleaseListPage();
 });
 
 configMenu?.addEventListener('click', (event) => {
@@ -3821,17 +4167,9 @@ autoStartModal?.addEventListener('click', (event) => {
 btnAutoStartClose?.addEventListener('click', () => resolveModalChoice(null));
 
 async function startAutoRunFromCurrentSettings() {
-  try {
-    await refreshContributionContentHint();
-  } catch (error) {
-    console.warn('Failed to refresh contribution content hint before auto run:', error);
-  }
-
   const totalRuns = getRunCountValue();
   let mode = 'restart';
   const autoRunSkipFailures = inputAutoSkipFailures.checked;
-  const contributionNickname = String(inputContributionNickname?.value || '').trim();
-  const contributionQq = String(inputContributionQq?.value || '').trim();
   const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
     inputAutoSkipFailuresThreadIntervalMinutes.value
   );
@@ -3873,9 +4211,6 @@ async function startAutoRunFromCurrentSettings() {
       totalRuns,
       delayMinutes,
       autoRunSkipFailures,
-      contributionMode: Boolean(latestState?.contributionMode),
-      contributionNickname,
-      contributionQq,
       mode,
     },
   });
@@ -4048,6 +4383,61 @@ inputVpsPassword.addEventListener('blur', () => {
   input?.addEventListener('blur', () => {
     saveSettings({ silent: true }).catch(() => { });
   });
+});
+
+[inputHeroSmsBaseUrl, inputHeroSmsApiKey, inputHeroSmsService, inputHeroSmsCountry].forEach((input) => {
+  input?.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+});
+
+inputHeroSmsBaseUrl?.addEventListener('blur', () => {
+  inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(inputHeroSmsBaseUrl.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsApiKey?.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsService?.addEventListener('blur', () => {
+  inputHeroSmsService.value = normalizeHeroSmsServiceValue(inputHeroSmsService.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsCountry?.addEventListener('blur', () => {
+  inputHeroSmsCountry.value = normalizeHeroSmsCountryValue(inputHeroSmsCountry.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+btnHeroSmsResend?.addEventListener('click', async () => {
+  if (heroSmsActionInFlight) {
+    return;
+  }
+
+  heroSmsActionInFlight = true;
+  updateHeroSmsResendButtonState();
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'HERO_SMS_RESEND_CODE',
+      source: 'sidepanel',
+      payload: {},
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    showToast('已请求 HeroSMS 重发验证码。', 'success', 1800);
+  } catch (err) {
+    showToast(`HeroSMS 重发失败：${err.message}`, 'error');
+  } finally {
+    heroSmsActionInFlight = false;
+    updateHeroSmsResendButtonState();
+  }
+});
+
+btnHeroSmsRefreshActive?.addEventListener('click', async () => {
+  await refreshHeroSmsActiveActivations({ silent: false });
 });
 
 [inputLuckmailApiKey, inputLuckmailBaseUrl, inputLuckmailDomain].forEach((input) => {
@@ -4271,6 +4661,22 @@ inputSub2ApiDefaultProxy.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputCodex2ApiUrl.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputCodex2ApiUrl.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputCodex2ApiAdminKey.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputCodex2ApiAdminKey.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputEmailPrefix.addEventListener('input', () => {
   maybeClearGeneratedAliasAfterEmailPrefixChange().catch(() => { });
   syncManagedAliasBaseEmailDraftFromInput();
@@ -4385,6 +4791,13 @@ inputTempEmailReceiveMailbox.addEventListener('input', () => {
 });
 inputTempEmailReceiveMailbox.addEventListener('blur', () => {
   inputTempEmailReceiveMailbox.value = normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputTempEmailUseRandomSubdomain?.addEventListener('change', () => {
+  updateMailProviderUI();
+  clearRegistrationEmail({ silent: true }).catch(() => { });
+  markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -4563,6 +4976,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       applyAutoRunStatus(currentAutoRun);
       updateProgressCounter();
       updateButtonStates();
+      renderHeroSmsPanel(latestState);
       renderHotmailAccounts();
       renderMail2925Accounts();
       if (isLuckmailProvider()) {
@@ -4579,7 +4993,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (
         message.payload.password !== undefined
         || message.payload.customPassword !== undefined
-        || message.payload.contributionMode !== undefined
       ) {
         syncPasswordField(latestState || {});
       }
@@ -4610,8 +5023,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.cloudflareTempEmailReceiveMailbox !== undefined) {
         inputTempEmailReceiveMailbox.value = message.payload.cloudflareTempEmailReceiveMailbox || '';
       }
+      if (message.payload.cloudflareTempEmailUseRandomSubdomain !== undefined && inputTempEmailUseRandomSubdomain) {
+        inputTempEmailUseRandomSubdomain.checked = Boolean(message.payload.cloudflareTempEmailUseRandomSubdomain);
+      }
       if (message.payload.cloudflareTempEmailDomain !== undefined || message.payload.cloudflareTempEmailDomains !== undefined) {
         renderCloudflareTempEmailDomainOptions(message.payload.cloudflareTempEmailDomain || latestState?.cloudflareTempEmailDomain || '');
+      }
+      if (
+        message.payload.cloudflareTempEmailUseRandomSubdomain !== undefined
+        || message.payload.cloudflareTempEmailDomain !== undefined
+        || message.payload.cloudflareTempEmailDomains !== undefined
+      ) {
+        updateMailProviderUI();
+      }
+      if (message.payload.heroSmsBaseUrl !== undefined) {
+        inputHeroSmsBaseUrl.value = normalizeHeroSmsBaseUrlValue(message.payload.heroSmsBaseUrl);
+      }
+      if (message.payload.heroSmsApiKey !== undefined) {
+        inputHeroSmsApiKey.value = message.payload.heroSmsApiKey || '';
+      }
+      if (message.payload.heroSmsService !== undefined) {
+        inputHeroSmsService.value = message.payload.heroSmsService || '';
+      }
+      if (message.payload.heroSmsCountry !== undefined) {
+        inputHeroSmsCountry.value = message.payload.heroSmsCountry || '';
       }
       if (message.payload.currentHotmailAccountId !== undefined || message.payload.hotmailAccounts !== undefined) {
         renderHotmailAccounts();
@@ -4698,7 +5133,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           )
         );
       }
-      renderContributionMode();
+      renderHeroSmsPanel(latestState);
       break;
     }
 
@@ -4778,14 +5213,6 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-window.addEventListener('resize', () => {
-  positionContributionUpdateHint();
-});
-
-document.addEventListener('scroll', () => {
-  positionContributionUpdateHint();
-}, true);
-
 // ============================================================
 // Init
 // ============================================================
@@ -4808,7 +5235,12 @@ restoreState().then(() => {
   updatePanelModeUI();
   updateButtonStates();
   updateStatusDisplay(latestState);
-  return refreshContributionContentHint();
+  renderHeroSmsPanel(latestState);
+  return maybeShowNewUserGuidePrompt();
 }).catch((err) => {
   console.error('Failed to initialize sidepanel state:', err);
 });
+
+setInterval(() => {
+  renderHeroSmsPanel(latestState);
+}, 1000);
