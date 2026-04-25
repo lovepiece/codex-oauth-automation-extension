@@ -7331,6 +7331,17 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       }
 
       const restartDecision = await getPostStep6AutoRestartDecision(step, err);
+      if (restartDecision.continueAtStep) {
+        const authState = restartDecision.authState;
+        const addPhoneUrl = authState?.url || 'https://auth.openai.com/add-phone';
+        await addLog(
+          `步骤 ${step}：检测到认证流程进入 add-phone（${addPhoneUrl}），改由步骤 ${restartDecision.continueAtStep} 手机号验证继续处理。`,
+          'warn'
+        );
+        step = restartDecision.continueAtStep;
+        continue;
+      }
+
       if (restartDecision.shouldRestart) {
         postStep7RestartCount += 1;
         const authState = restartDecision.authState;
@@ -8238,12 +8249,18 @@ function isHeroSmsTimeoutStep7RestartError(error) {
     || /等待手机短信超过\s*3\s*分钟仍未收到验证码|hero_sms_timeout_restart_step7/i.test(getErrorMessage(error));
 }
 
+function isHeroSmsNoNumbersError(error) {
+  return /HeroSMS\s+getNumber(?:V2)?\s+(?:returned\s+an\s+unexpected\s+payload|returned\s+an\s+error|返回异常)[：:\s]+NO_NUMBERS\b|NO_NUMBERS/i
+    .test(getErrorMessage(error));
+}
+
 async function getPostStep6AutoRestartDecision(step, error) {
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
   if (!Number.isFinite(normalizedStep) || normalizedStep < 7 || normalizedStep > LAST_STEP_ID) {
     return {
       shouldRestart: false,
+      continueAtStep: 0,
       blockedByAddPhone: false,
       errorMessage,
       authState: null,
@@ -8263,8 +8280,29 @@ async function getPostStep6AutoRestartDecision(step, error) {
     });
   }
 
+  if (isHeroSmsNoNumbersError(error)) {
+    return {
+      shouldRestart: false,
+      continueAtStep: 0,
+      blockedByAddPhone: false,
+      errorMessage,
+      authState,
+    };
+  }
+
+  if (isAddPhoneAuthState(authState) && !isHeroSmsTimeoutStep7RestartError(error)) {
+    return {
+      shouldRestart: false,
+      continueAtStep: normalizedStep < 9 ? 9 : 0,
+      blockedByAddPhone: normalizedStep >= 9,
+      errorMessage,
+      authState,
+    };
+  }
+
   return {
     shouldRestart: true,
+    continueAtStep: 0,
     blockedByAddPhone: false,
     errorMessage,
     authState,

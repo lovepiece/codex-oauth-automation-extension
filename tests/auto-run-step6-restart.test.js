@@ -57,6 +57,7 @@ const bundle = [
   extractFunction('isAddPhoneAuthUrl'),
   extractFunction('isAddPhoneAuthState'),
   extractFunction('isHeroSmsTimeoutStep7RestartError'),
+  extractFunction('isHeroSmsNoNumbersError'),
   extractFunction('getPostStep6AutoRestartDecision'),
   extractFunction('runAutoSequenceFromStep'),
 ].join('\n');
@@ -184,7 +185,7 @@ test('auto-run keeps restarting from step 7 after post-login failures without a 
   assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
-test('auto-run restarts from step 7 once add-phone is detected after step 7', async () => {
+test('auto-run continues at step 9 once add-phone is detected after step 7', async () => {
   const harness = createHarness({
     failureStep: 7,
     failureBudget: 1,
@@ -194,9 +195,10 @@ test('auto-run restarts from step 7 once add-phone is detected after step 7', as
 
   const events = await harness.run();
 
-  assert.equal(events.invalidations.length, 1);
-  assert.deepStrictEqual(events.steps, [7, 7, 8, 9, 10]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
+  assert.equal(events.invalidations.length, 0);
+  assert.deepStrictEqual(events.steps, [7, 9, 10]);
+  assert.ok(events.logs.some(({ message }) => /改由步骤 9 手机号验证继续处理/.test(message)));
+  assert.ok(!events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
 test('auto-run restarts from step 7 on generic phone-page failure messages', async () => {
@@ -227,6 +229,22 @@ test('auto-run restarts from step 7 after HeroSMS 3 minute timeout even on add-p
   assert.equal(events.invalidations.length, 1);
   assert.deepStrictEqual(events.steps, [7, 8, 9, 7, 8, 9, 10]);
   assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
+});
+
+test('auto-run does not restart step 7 when HeroSMS has no numbers on add-phone page', async () => {
+  const harness = createHarness({
+    failureStep: 9,
+    failureBudget: 1,
+    failureMessage: 'HeroSMS getNumber returned an unexpected payload: NO_NUMBERS',
+    authState: { state: 'add_phone_page', url: 'https://auth.openai.com/add-phone' },
+  });
+
+  const result = await harness.runAndCaptureError();
+
+  assert.equal(result?.error?.message, 'HeroSMS getNumber returned an unexpected payload: NO_NUMBERS');
+  assert.equal(result.events.invalidations.length, 0);
+  assert.deepStrictEqual(result.events.steps, [7, 8, 9]);
+  assert.ok(!result.events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
 test('auto-run stop errors after step 7 are rethrown immediately instead of restarting', async () => {
