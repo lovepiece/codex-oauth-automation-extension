@@ -16,8 +16,8 @@ function extractFunction(name) {
   let parenDepth = 0;
   let signatureEnded = false;
   let braceStart = -1;
-  for (let i = start; i < sidepanelSource.length; i += 1) {
-    const ch = sidepanelSource[i];
+  for (let index = start; index < sidepanelSource.length; index += 1) {
+    const ch = sidepanelSource[index];
     if (ch === '(') {
       parenDepth += 1;
     } else if (ch === ')') {
@@ -26,7 +26,7 @@ function extractFunction(name) {
         signatureEnded = true;
       }
     } else if (ch === '{' && signatureEnded) {
-      braceStart = i;
+      braceStart = index;
       break;
     }
   }
@@ -48,7 +48,7 @@ function extractFunction(name) {
   return sidepanelSource.slice(start, end);
 }
 
-test('sidepanel html exposes header repo and releases entry points', () => {
+test('sidepanel html exposes header repo entry and version label', () => {
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
 
   assert.match(
@@ -57,36 +57,26 @@ test('sidepanel html exposes header repo and releases entry points', () => {
   );
   assert.match(
     html,
-    /id="extension-update-status"[\s\S]*title="打开 GitHub Releases 页面"/
+    /<span id="extension-update-status" class="header-version-title">Pro0\.0<\/span>/
   );
+  assert.doesNotMatch(html, /update-service\.js|btn-release-log|update-section|GitHub Releases/);
 });
 
-test('header link helpers resolve repo and releases urls', () => {
+test('header repo helper opens repository url', () => {
   const bundle = [
     extractFunction('getRepositoryHomeUrl'),
-    extractFunction('getReleaseListUrl'),
     extractFunction('openRepositoryHomePage'),
-    extractFunction('openReleaseListPage'),
   ].join('\n');
 
   const api = new Function(`
 const opened = [];
-const sidepanelUpdateService = {
-  releasesPageUrl: 'https://github.com/example/project/releases',
-};
-let currentReleaseSnapshot = null;
 function openExternalUrl(url) {
   opened.push(url);
 }
 ${bundle}
 return {
   getRepositoryHomeUrl,
-  getReleaseListUrl,
   openRepositoryHomePage,
-  openReleaseListPage,
-  setSnapshot(snapshot) {
-    currentReleaseSnapshot = snapshot;
-  },
   getOpened() {
     return opened;
   },
@@ -95,21 +85,12 @@ return {
 
   assert.equal(
     api.getRepositoryHomeUrl(),
-    'https://github.com/example/project'
-  );
-  assert.equal(
-    api.getReleaseListUrl(),
-    'https://github.com/example/project/releases'
+    'https://github.com/QLHazyCoder/codex-oauth-automation-extension'
   );
 
-  api.setSnapshot({
-    releasesPageUrl: 'https://github.com/example/project/releases',
-  });
   api.openRepositoryHomePage();
-  api.openReleaseListPage();
 
   assert.deepEqual(api.getOpened(), [
-    'https://github.com/example/project',
-    'https://github.com/example/project/releases',
+    'https://github.com/QLHazyCoder/codex-oauth-automation-extension',
   ]);
 });

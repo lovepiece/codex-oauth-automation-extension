@@ -25,9 +25,7 @@
       </button>
       <div class="header-version-block">
         <div class="header-version-main">
-          <button id="extension-update-status" class="header-version-title header-version-link" type="button"
-            aria-label="打开 GitHub Releases 页面" title="打开 GitHub Releases 页面">Pro0.0</button>
-          <button id="btn-release-log" class="header-link-btn" type="button" hidden>更新日志</button>
+          <span id="extension-update-status" class="header-version-title">Pro0.0</span>
         </div>
         <span id="extension-version-meta" class="header-version-meta" hidden></span>
       </div>
@@ -78,20 +76,6 @@
       </div>
     </div>
   </header>
-
-  <section id=”update-section” hidden>
-    <div class="update-card">
-      <div class="update-card-header">
-        <div class="update-card-copy">
-          <span class="section-label">更新内容</span>
-          <div id="update-card-version" class="update-card-version"></div>
-          <p id="update-card-summary" class="update-card-summary"></p>
-        </div>
-        <button id="btn-open-release" class="btn btn-primary btn-sm" type="button">前往更新</button>
-      </div>
-      <div id="update-release-list" class="update-release-list"></div>
-    </div>
-  </section>
 
   <section id="data-section">
     <div id="settings-card" class="data-card">
@@ -799,7 +783,6 @@
   <script src="../hotmail-utils.js"></script>
   <script src="../luckmail-utils.js"></script>
   <script src="../data/step-definitions.js"></script>
-  <script src="update-service.js"></script>
   <script src="account-pool-ui.js"></script>
   <script src="hotmail-manager.js"></script>
   <script src="mail-2925-manager.js"></script>
