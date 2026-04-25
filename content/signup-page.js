@@ -23,6 +23,12 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'RESEND_VERIFICATION_CODE'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
+      || message.type === 'GET_PHONE_VERIFICATION_STATE'
+      || message.type === 'SUBMIT_PHONE_NUMBER'
+      || message.type === 'FILL_PHONE_VERIFICATION_CODE'
+      || message.type === 'RESEND_PHONE_VERIFICATION_CODE'
+      || message.type === 'CLICK_PHONE_VERIFICATION_RETRY'
+      || message.type === 'GO_BACK_TO_PHONE_NUMBER_ENTRY'
     ) {
       resetStopState();
       handleCommand(message).then((result) => {
@@ -1952,7 +1958,7 @@ async function submitPhoneNumber(payload = {}) {
   await humanPause(450, 1100);
   const hiddenPhoneInput = getPhoneNumberHiddenInput();
   const fullDigitsPhoneNumber = getPhoneDigits(phoneNumber);
-  const directPhoneValue = buildInternationalPhoneValue(phoneNumber, null)
+  const directPhoneValue = buildInternationalPhoneValue(phoneNumber, phoneCountry)
     || (fullDigitsPhoneNumber ? `+${fullDigitsPhoneNumber}` : String(phoneNumber || '').trim());
   const phoneInputValue = directPhoneValue;
   const hiddenValue = directPhoneValue;

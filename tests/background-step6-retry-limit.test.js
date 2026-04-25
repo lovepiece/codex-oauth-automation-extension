@@ -27,6 +27,34 @@ test('step 6 runs cookie cleanup and completes from background', async () => {
   assert.deepStrictEqual(events.completedSteps, [6]);
 });
 
+test('step 1 clears login cookies before opening ChatGPT', async () => {
+  const source = fs.readFileSync('background/steps/open-chatgpt.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep1;`)(globalScope);
+
+  const events = [];
+  const executor = api.createStep1Executor({
+    addLog: async (message) => events.push(['log', message]),
+    completeStepFromBackground: async (step) => events.push(['complete', step]),
+    openSignupEntryTab: async (step) => events.push(['open', step]),
+    runPreStep6CookieCleanup: async (options) => events.push(['cleanup', options]),
+  });
+
+  await executor.executeStep1();
+
+  assert.equal(events[0][0], 'cleanup');
+  assert.deepEqual(events[0][1], {
+    delayMs: 0,
+    stepLabel: '步骤 1',
+    finalMessage: '准备打开 ChatGPT 官网。',
+  });
+  assert.deepEqual(events.slice(1), [
+    ['log', '步骤 1：正在打开 ChatGPT 官网...'],
+    ['open', 1],
+    ['complete', 1],
+  ]);
+});
+
 test('step 7 retries up to configured limit and then fails', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};

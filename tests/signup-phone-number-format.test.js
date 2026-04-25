@@ -93,6 +93,7 @@ return {
 test('phone submit waits for continue button after filling number', () => {
   const submitPhoneNumberSource = extractFunction('submitPhoneNumber');
 
+  assert.match(source.slice(0, source.indexOf('function getVerificationCodeTarget')), /message\.type === 'SUBMIT_PHONE_NUMBER'/);
   assert.match(source, /async function waitForPhoneActionButtonEnabled\(/);
   assert.ok(
     submitPhoneNumberSource.indexOf('const actionButton = snapshot.actionButton')
@@ -109,6 +110,15 @@ test('phone submit waits for continue button after filling number', () => {
     ),
     /isActionEnabled\(actionButton\)/
   );
+});
+
+test('phone submit fills full international number without preselecting country', () => {
+  const submitPhoneNumberSource = extractFunction('submitPhoneNumber');
+
+  assert.doesNotMatch(submitPhoneNumberSource, /ensurePhoneCountryMatchesNumber\(phoneNumber, phoneCountry\)/);
+  assert.doesNotMatch(submitPhoneNumberSource, /normalizePhoneNumberForDialCode\(phoneNumber, selectedDialCode\)/);
+  assert.match(submitPhoneNumberSource, /const phoneInputValue = directPhoneValue/);
+  assert.match(submitPhoneNumberSource, /const hiddenValue = directPhoneValue/);
 });
 
 test('phone code entry only starts on phone-verification page', () => {

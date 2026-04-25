@@ -7548,6 +7548,7 @@ const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
   completeStepFromBackground,
   openSignupEntryTab,
+  runPreStep6CookieCleanup,
 });
 const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   addLog,
@@ -8075,16 +8076,23 @@ async function removeCookieDirectly(cookie) {
   }
 }
 
-async function runPreStep6CookieCleanup() {
+async function runPreStep6CookieCleanup(options = {}) {
+  const stepLabel = options.stepLabel || '步骤 6';
+  const delayMs = Math.max(0, Math.floor(Number(options.delayMs ?? STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS) || 0));
+  const finalMessage = options.finalMessage || '准备继续获取链接并登录。';
   await addLog(
-    `步骤 6：开始前等待 ${Math.round(STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS / 1000)} 秒，然后直接删除 ChatGPT / OpenAI cookies...`,
+    delayMs > 0
+      ? `${stepLabel}：开始前等待 ${Math.round(delayMs / 1000)} 秒，然后直接删除 ChatGPT / OpenAI cookies...`
+      : `${stepLabel}：开始前直接删除 ChatGPT / OpenAI cookies...`,
     'info'
   );
 
-  await sleepWithStop(STEP6_PRE_LOGIN_COOKIE_CLEAR_DELAY_MS);
+  if (delayMs > 0) {
+    await sleepWithStop(delayMs);
+  }
 
   if (!chrome.cookies?.getAll || !chrome.cookies?.remove) {
-    await addLog('步骤 6：当前浏览器不支持 cookies API，无法直接删除 cookies。', 'warn');
+    await addLog(`${stepLabel}：当前浏览器不支持 cookies API，无法直接删除 cookies。`, 'warn');
     return;
   }
 
@@ -8105,11 +8113,11 @@ async function runPreStep6CookieCleanup() {
         origins: PRE_LOGIN_COOKIE_CLEAR_ORIGINS,
       });
     } catch (err) {
-      await addLog(`步骤 6：browsingData 补扫 cookies 失败：${getErrorMessage(err)}`, 'warn');
+      await addLog(`${stepLabel}：browsingData 补扫 cookies 失败：${getErrorMessage(err)}`, 'warn');
     }
   }
 
-  await addLog(`步骤 6：已直接删除 ${removedCount} 个 ChatGPT / OpenAI cookies，准备继续获取链接并登录。`, 'ok');
+  await addLog(`${stepLabel}：已直接删除 ${removedCount} 个 ChatGPT / OpenAI cookies，${finalMessage}`, 'ok');
 }
 
 // ============================================================
@@ -8225,6 +8233,11 @@ function isAddPhoneAuthState(authState = {}) {
     || isAddPhoneAuthUrl(authState?.url);
 }
 
+function isHeroSmsTimeoutStep7RestartError(error) {
+  return error?.code === 'hero_sms_timeout_restart_step7'
+    || /等待手机短信超过\s*3\s*分钟仍未收到验证码|hero_sms_timeout_restart_step7/i.test(getErrorMessage(error));
+}
+
 async function getPostStep6AutoRestartDecision(step, error) {
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
@@ -8232,15 +8245,6 @@ async function getPostStep6AutoRestartDecision(step, error) {
     return {
       shouldRestart: false,
       blockedByAddPhone: false,
-      errorMessage,
-      authState: null,
-    };
-  }
-
-  if (isAddPhoneAuthFailure(error) || isAddPhoneAuthUrl(errorMessage)) {
-    return {
-      shouldRestart: false,
-      blockedByAddPhone: true,
       errorMessage,
       authState: null,
     };
@@ -8257,15 +8261,6 @@ async function getPostStep6AutoRestartDecision(step, error) {
       sourceError: errorMessage,
       inspectError: inspectError?.message || inspectError,
     });
-  }
-
-  if (isAddPhoneAuthState(authState)) {
-    return {
-      shouldRestart: false,
-      blockedByAddPhone: true,
-      errorMessage,
-      authState,
-    };
   }
 
   return {

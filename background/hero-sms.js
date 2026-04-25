@@ -203,6 +203,30 @@
         && Number(attempt) === 1;
     }
 
+    async function clickPhonePageResendOnce(tabId, logPrefix) {
+      await throwIfPhoneVerificationPageRequiresFreshNumber(tabId, `${logPrefix}前`);
+      const resendPageResult = await resendPhoneVerificationCode(tabId);
+      let heroSmsResendRequested = false;
+      if (resendPageResult?.errorText) {
+        const pageResendError = new Error(resendPageResult.errorText);
+        pageResendError.errorText = resendPageResult.errorText;
+        if (shouldRetryWithFreshNumber(pageResendError)) {
+          throw pageResendError;
+        }
+        await addLog?.(`步骤 9：${logPrefix}提示错误（${resendPageResult.errorText}），继续等待验证码...`, 'warn');
+      } else if (resendPageResult?.resent) {
+        await addLog?.(`步骤 9：${logPrefix}，已点击页面上的"重新发送短信"按钮。`, 'warn');
+        await requestFreshSmsBeforeReceive(`${logPrefix}后`);
+        heroSmsResendRequested = true;
+      } else {
+        await addLog?.(`步骤 9：${logPrefix}，但当前页面重发按钮暂不可用。`, 'warn');
+      }
+      if (resendPageResult && typeof resendPageResult === 'object') {
+        resendPageResult.heroSmsResendRequested = heroSmsResendRequested;
+      }
+      return resendPageResult;
+    }
+
     async function ensureFailedActivationCleanupAlarm(entry) {
       if (!chrome?.alarms || !entry?.activationId || !entry?.cleanupAt) {
         return;
@@ -255,11 +279,75 @@
       return activations;
     }
 
+    async function ensureCurrentActivationExistsBeforeSubmit(activation) {
+      if (!activation?.activationId || !activation?.phoneNumber) {
+        throw new Error('HeroSMS 当前号码记录不完整，无法提交手机号。');
+      }
+
+      const activeList = await syncActiveActivations({ fetchedAt: Date.now() });
+      const currentPhoneDigits = String(activation.phoneNumber || '').replace(/\D/g, '');
+      const found = (Array.isArray(activeList) ? activeList : []).some((item) => {
+        const itemId = Number(item?.activationId) || 0;
+        const itemPhoneDigits = String(item?.phoneNumber || '').replace(/\D/g, '');
+        return itemId === Number(activation.activationId)
+          || (currentPhoneDigits && itemPhoneDigits === currentPhoneDigits);
+      });
+
+      if (!found) {
+        throw new Error(`HeroSMS 当前号码 ${activation.phoneNumber}（ID ${activation.activationId}）已不在 active activations 列表中，停止填写手机号。`);
+      }
+
+      return true;
+    }
+
     async function requestResendForCurrentActivation(options = {}) {
       await syncRuntimeFromExtension();
       const result = await runtime.requestResendForCurrentActivation(options);
       await syncRuntimeToExtension();
       return result;
+    }
+
+    async function requestFreshSmsBeforeReceive(reasonLabel = '接收短信前') {
+      await addLog?.(`步骤 9：${reasonLabel}，正在通过 HeroSMS API 请求新的手机验证码（status=3）...`, 'warn');
+      return requestResendForCurrentActivation({ silent: false });
+    }
+
+    async function recordSuccessfulPhoneVerification(activationId) {
+      await syncRuntimeFromExtension();
+      const currentActivation = runtime.getCurrentActivation();
+      if (!currentActivation || Number(currentActivation.activationId) !== Number(activationId)) {
+        await setState({ heroSmsPendingSuccessActivationId: 0 });
+        broadcastDataUpdate?.({ heroSmsPendingSuccessActivationId: 0 });
+        return { ok: true, skipped: true };
+      }
+
+      const nextUseCount = currentActivation.useCount + 1;
+      runtime.mergeCurrentActivation({ useCount: nextUseCount });
+      await syncRuntimeToExtension();
+
+      const updatedActivation = runtime.getCurrentActivation();
+      const expired = runtime.getActivationRemainingMs(updatedActivation) <= 0;
+
+      await setState({ heroSmsPendingSuccessActivationId: 0 });
+      broadcastDataUpdate?.({ heroSmsPendingSuccessActivationId: 0 });
+
+      if (nextUseCount >= HERO_SMS_NUMBER_MAX_USES || expired) {
+        await addLog?.(
+          `HeroSMS：号码 ${updatedActivation.phoneNumber} 已成功验证手机 ${nextUseCount}/${HERO_SMS_NUMBER_MAX_USES} 次，准备${nextUseCount >= HERO_SMS_NUMBER_MAX_USES ? '完成激活' : '释放号码'}。`,
+          'ok'
+        );
+        return finalizeActivation({
+          preferComplete: nextUseCount >= HERO_SMS_NUMBER_MAX_USES,
+          releaseReason: nextUseCount >= HERO_SMS_NUMBER_MAX_USES ? 'max_phone_verifications_reached' : 'expired_after_phone_verification',
+          silent: false,
+        });
+      }
+
+      await addLog?.(
+        `HeroSMS：号码 ${updatedActivation.phoneNumber} 已累计成功验证手机 ${nextUseCount}/${HERO_SMS_NUMBER_MAX_USES} 次，剩余 ${HERO_SMS_NUMBER_MAX_USES - nextUseCount} 次可复用。`,
+        'ok'
+      );
+      return { ok: true, released: false, useCount: nextUseCount };
     }
 
     async function cleanupFailedActivation(activationId) {
@@ -324,6 +412,24 @@
       });
     }
 
+    async function throwIfPhoneVerificationPageRequiresFreshNumber(tabId, actionLabel = '检查手机号验证码页') {
+      const phoneState = await getPhoneState(tabId).catch((error) => {
+        addLog?.(`步骤 9：${actionLabel}状态读取失败：${error.message}，继续当前流程。`, 'warn');
+        return null;
+      });
+      const errorText = String(phoneState?.errorText || '').trim();
+      if (!errorText) {
+        return phoneState;
+      }
+
+      const pageError = new Error(errorText);
+      pageError.errorText = errorText;
+      if (shouldRetryWithFreshNumber(pageError)) {
+        throw pageError;
+      }
+      return phoneState;
+    }
+
     async function goBackToPhoneNumberEntry(tabId) {
       return sendSignupPageCommand(tabId, 'GO_BACK_TO_PHONE_NUMBER_ENTRY', {}, {
         timeoutMs: 30000,
@@ -343,6 +449,7 @@
 
         const phoneCountry = await runtime.getCountrySelection(activation.country || state.heroSmsCountry).catch(() => null);
         const isReusedNumber = Boolean(activation.lastCode) || activation.useCount > 0;
+        await ensureCurrentActivationExistsBeforeSubmit(activation);
         runtime.setRuntimeStatus(`正在提交手机号 ${activation.phoneNumber}`);
         await syncRuntimeToExtension();
         await addLog?.(`步骤 9：检测到手机号页面，正在使用 HeroSMS 号码 ${activation.phoneNumber}${phoneCountry?.name ? `（国家：${phoneCountry.name}）` : ''} 自动接码...`, 'warn');
@@ -363,12 +470,10 @@
             }
           }
           runtime.setRuntimeStatus(`号码 ${activation.phoneNumber} 已提交，等待短信验证码`);
+          await throwIfPhoneVerificationPageRequiresFreshNumber(tabId, '提交手机号后');
+          await requestFreshSmsBeforeReceive('接收短信前');
 
           if (isReusedNumber) {
-            await addLog?.(`步骤 9：当前号码已复用 ${activation.useCount}/${HERO_SMS_NUMBER_MAX_USES} 次，立即通过 HeroSMS API 请求新的手机验证码（status=3）...`, 'warn');
-            await runtime.requestResendForCurrentActivation({ silent: false });
-            await syncRuntimeToExtension();
-
             await sleepWithStop(3000);
 
             try {
@@ -403,23 +508,13 @@
             onResend: async ({ attempt: resendAttempt, reason }) => {
               const reasonText = reason === 'initial' ? '准备下一轮复用' : '等待新短信超时';
               await addLog?.(`步骤 9：${reasonText}，正在通过 HeroSMS API 请求新的手机号验证码（第 ${resendAttempt} 次）...`, 'warn');
+              await throwIfPhoneVerificationPageRequiresFreshNumber(tabId, '请求重发前');
 
               if (shouldTriggerPageResend(reason, resendAttempt)) {
                 try {
-                  const resendPageResult = await resendPhoneVerificationCode(tabId);
-                  if (resendPageResult?.resent) {
-                    await addLog?.('步骤 9：等待满 1 分钟后，已额外点击一次页面上的"重新发送短信"按钮。', 'warn');
-                  } else {
-                    await addLog?.('步骤 9：等待满 1 分钟后尝试点击页面重发按钮，但当前页面按钮暂不可用。', 'warn');
-                  }
-
-                  if (resendPageResult?.errorText) {
-                    const pageResendError = new Error(resendPageResult.errorText);
-                    pageResendError.errorText = resendPageResult.errorText;
-                    if (shouldRetryWithFreshNumber(pageResendError)) {
-                      throw pageResendError;
-                    }
-                    await addLog?.(`步骤 9：页面重发提示错误（${resendPageResult.errorText}），继续等待验证码...`, 'warn');
+                  const resendPageResult = await clickPhonePageResendOnce(tabId, '等待满 1 分钟后额外重发短信');
+                  if (resendPageResult?.heroSmsResendRequested) {
+                    return;
                   }
                 } catch (resendErr) {
                   if (shouldRetryWithFreshNumber(resendErr)) {
@@ -429,8 +524,7 @@
                 }
               }
 
-              await runtime.requestResendForCurrentActivation({ silent: false });
-              await syncRuntimeToExtension();
+              await requestFreshSmsBeforeReceive('HeroSMS 轮询等待 60 秒后');
             },
           });
           await syncRuntimeToExtension();
@@ -447,8 +541,7 @@
             throw fillError;
           }
 
-          await setState({ heroSmsPendingSuccessActivationId: activation.activationId });
-          broadcastDataUpdate?.({ heroSmsPendingSuccessActivationId: activation.activationId });
+          await recordSuccessfulPhoneVerification(activation.activationId);
           runtime.setRuntimeStatus('手机号验证码已提交，等待页面跳转');
           await syncRuntimeToExtension();
           return {
@@ -495,6 +588,13 @@
               }
             } catch (listErr) {
               await addLog?.(`步骤 9：处理失败号码时出错：${listErr.message}`, 'warn');
+            }
+
+            if (reason === 'hero_sms_wait_code_timeout') {
+              const restartError = new Error('步骤 9：等待手机短信超过 3 分钟仍未收到验证码，已处理旧号码，准备回到步骤 7 重新执行后续流程并申请新号码。');
+              restartError.code = 'hero_sms_timeout_restart_step7';
+              restartError.errorText = restartError.message;
+              throw restartError;
             }
 
             const recovery = resolveRecoveryAction(reason);

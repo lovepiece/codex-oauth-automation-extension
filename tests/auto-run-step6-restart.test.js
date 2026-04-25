@@ -56,6 +56,7 @@ const bundle = [
   extractFunction('isAddPhoneAuthFailure'),
   extractFunction('isAddPhoneAuthUrl'),
   extractFunction('isAddPhoneAuthState'),
+  extractFunction('isHeroSmsTimeoutStep7RestartError'),
   extractFunction('getPostStep6AutoRestartDecision'),
   extractFunction('runAutoSequenceFromStep'),
 ].join('\n');
@@ -183,7 +184,7 @@ test('auto-run keeps restarting from step 7 after post-login failures without a 
   assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
-test('auto-run stops restarting once add-phone is detected', async () => {
+test('auto-run restarts from step 7 once add-phone is detected after step 7', async () => {
   const harness = createHarness({
     failureStep: 7,
     failureBudget: 1,
@@ -191,15 +192,14 @@ test('auto-run stops restarting once add-phone is detected', async () => {
     authState: { state: 'add_phone_page', url: 'https://auth.openai.com/add-phone' },
   });
 
-  const result = await harness.runAndCaptureError();
+  const events = await harness.run();
 
-  assert.ok(result?.error);
-  assert.equal(result.events.invalidations.length, 0);
-  assert.deepStrictEqual(result.events.steps, [7]);
-  assert.ok(result.events.logs.some(({ message }) => /进入 add-phone/.test(message)));
+  assert.equal(events.invalidations.length, 1);
+  assert.deepStrictEqual(events.steps, [7, 7, 8, 9, 10]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
-test('auto-run stops restarting on generic phone-page failure messages even without add-phone url', async () => {
+test('auto-run restarts from step 7 on generic phone-page failure messages', async () => {
   const harness = createHarness({
     failureStep: 9,
     failureBudget: 1,
@@ -207,12 +207,26 @@ test('auto-run stops restarting on generic phone-page failure messages even with
     authState: { state: 'password_page', url: 'https://auth.openai.com/log-in' },
   });
 
-  const result = await harness.runAndCaptureError();
+  const events = await harness.run();
 
-  assert.ok(result?.error);
-  assert.equal(result.events.invalidations.length, 0);
-  assert.deepStrictEqual(result.events.steps, [7, 8, 9]);
-  assert.ok(!result.events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
+  assert.equal(events.invalidations.length, 1);
+  assert.deepStrictEqual(events.steps, [7, 8, 9, 7, 8, 9, 10]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
+});
+
+test('auto-run restarts from step 7 after HeroSMS 3 minute timeout even on add-phone state', async () => {
+  const harness = createHarness({
+    failureStep: 9,
+    failureBudget: 1,
+    failureMessage: '步骤 9：等待手机短信超过 3 分钟仍未收到验证码，已处理旧号码，准备回到步骤 7 重新执行后续流程并申请新号码。',
+    authState: { state: 'add_phone_page', url: 'https://auth.openai.com/add-phone' },
+  });
+
+  const events = await harness.run();
+
+  assert.equal(events.invalidations.length, 1);
+  assert.deepStrictEqual(events.steps, [7, 8, 9, 7, 8, 9, 10]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
 });
 
 test('auto-run stop errors after step 7 are rethrown immediately instead of restarting', async () => {

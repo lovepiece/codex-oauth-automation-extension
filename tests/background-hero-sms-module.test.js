@@ -73,7 +73,7 @@ test('handlePhonePageDuringStep8 triggers page resend on first timeout and injec
     moveActivationToFailedList: async () => null,
     moveActivationToStandbyList: async () => null,
     finalizeActivation: async () => ({ released: false }),
-    syncActiveActivations: async () => [],
+    syncActiveActivations: async () => [activation],
     cleanupFailedActivation: async () => ({ ok: true }),
     getActivationRemainingMs: () => 60_000,
     mergeCurrentActivation(patch = {}) {
@@ -153,12 +153,249 @@ test('handlePhonePageDuringStep8 triggers page resend on first timeout and injec
   ]);
 
   const pageResendIndex = events.findIndex((entry) => entry[0] === 'message' && entry[1] === 'RESEND_PHONE_VERIFICATION_CODE');
-  const heroResendIndex = events.findIndex((entry) => entry[0] === 'hero-resend');
+  const heroResendIndexes = events
+    .map((entry, index) => [entry, index])
+    .filter(([entry]) => entry[0] === 'hero-resend')
+    .map(([, index]) => index);
   assert.ok(pageResendIndex >= 0, 'should click page resend after first timeout');
-  assert.ok(heroResendIndex > pageResendIndex, 'page resend should happen before HeroSMS resend request');
+  assert.ok(heroResendIndexes.some((index) => index < pageResendIndex), 'should request HeroSMS status=3 before receiving SMS');
+  assert.ok(heroResendIndexes.some((index) => index > pageResendIndex), 'page resend should request HeroSMS status=3 again');
 
   assert.ok(
-    events.some((entry) => entry[0] === 'log' && /等待满 1 分钟后，已额外点击一次页面上的"重新发送短信"按钮/.test(entry[1])),
+    events.some((entry) => entry[0] === 'log' && /等待满 1 分钟后额外重发短信，已点击页面上的"重新发送短信"按钮/.test(entry[1])),
     'should log page resend attempt after timeout'
+  );
+});
+
+test('hero sms phone verification only clicks page resend after 1 minute timeout', () => {
+  assert.doesNotMatch(source, /HERO_SMS_INITIAL_PAGE_RESEND_AFTER_MS/);
+  assert.doesNotMatch(source, /接收短信页面等待 15 秒后仍未收到短信/);
+  assert.match(source, /clickPhonePageResendOnce\(tabId, '等待满 1 分钟后额外重发短信'\)/);
+  assert.match(source, /shouldTriggerPageResend\(reason, resendAttempt\)/);
+  assert.doesNotMatch(source, /initialPageResend/);
+});
+
+test('hero sms timeout requests step 7 restart after old number cleanup', () => {
+  assert.match(source, /reason === 'hero_sms_wait_code_timeout'/);
+  assert.match(source, /hero_sms_timeout_restart_step7/);
+  assert.match(source, /等待手机短信超过 3 分钟仍未收到验证码/);
+});
+
+test('hero sms requests fresh sms before receive and counts phone verification success', () => {
+  assert.match(source, /requestFreshSmsBeforeReceive\('接收短信前'\)/);
+  assert.match(source, /excludeCodes: activation\.lastCode \? \[activation\.lastCode\] : \[\]/);
+  assert.match(source, /recordSuccessfulPhoneVerification\(activation\.activationId\)/);
+  assert.match(source, /已累计成功验证手机/);
+  assert.match(source, /nextUseCount >= HERO_SMS_NUMBER_MAX_USES/);
+});
+
+test('auto-run reset preserves current HeroSMS activation for next run', () => {
+  const autoRunSource = fs.readFileSync('background/auto-run-controller.js', 'utf8');
+  assert.match(autoRunSource, /currentHeroSmsActivation: prevState\.currentHeroSmsActivation \|\| null/);
+  assert.match(autoRunSource, /heroSmsLastCode: prevState\.heroSmsLastCode \|\| ''/);
+  assert.match(autoRunSource, /heroSmsStandbyActivations: Array\.isArray\(prevState\.heroSmsStandbyActivations\)/);
+  assert.match(autoRunSource, /heroSmsPendingSuccessActivationId: Number\(prevState\.heroSmsPendingSuccessActivationId\) \|\| 0/);
+});
+
+test('handlePhonePageDuringStep8 checks active activation before submitting phone number', async () => {
+  const activation = {
+    activationId: 202,
+    phoneNumber: '237686822243',
+    country: '37',
+    useCount: 0,
+    lastCode: '',
+  };
+  const state = {
+    heroSmsBaseUrl: 'https://hero-sms.com/stubs/handler_api.php',
+    heroSmsApiKey: 'sk-test',
+    heroSmsService: 'dr',
+    heroSmsCountry: '37',
+    currentHeroSmsActivation: activation,
+    heroSmsLastCode: '',
+    heroSmsRuntimeStatus: '',
+    heroSmsActiveActivations: [],
+    heroSmsActiveActivationsFetchedAt: 0,
+    heroSmsFailedActivations: [],
+    heroSmsPendingSuccessActivationId: 0,
+  };
+  const events = [];
+  const runtime = {
+    getState: () => state,
+    setState: (patch) => Object.assign(state, patch),
+    ensureActivationReadyForSubmission: async () => activation,
+    getCountrySelection: async () => ({ name: '喀麦隆' }),
+    setRuntimeStatus: (status) => events.push(['runtime-status', status]),
+    syncActiveActivations: async () => [],
+  };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundHeroSms;`)({
+    MultiPageBackgroundHeroSms: null,
+    HeroSmsCore: {
+      createHeroSmsRuntime: () => runtime,
+      DEFAULT_HERO_SMS_BASE_URL: 'https://hero-sms.com/stubs/handler_api.php',
+      HERO_SMS_NUMBER_MAX_USES: 5,
+      HERO_SMS_SMS_POLL_INTERVAL_MS: 5000,
+      HERO_SMS_SMS_TIMEOUT_MS: 180000,
+      HERO_SMS_RESEND_AFTER_MS: 60000,
+      HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT: 3,
+      HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS: 2 * 60 * 1000,
+      normalizeHeroSmsBaseUrl: (value) => String(value || '').trim(),
+      normalizeHeroSmsService: (value) => String(value || '').trim().toLowerCase(),
+      normalizeHeroSmsCountry: (value) => String(value || '').trim(),
+    },
+  });
+  const manager = api.createHeroSmsManager({
+    addLog: async (message) => events.push(['log', message]),
+    broadcastDataUpdate: () => {},
+    chrome: { runtime: { getURL: (path) => path } },
+    ensureContentScriptReadyOnTab: async () => {},
+    getState: async () => state,
+    sendTabMessageWithTimeout: async (_tabId, _source, message) => {
+      events.push(['message', message.type]);
+      return {};
+    },
+    setState: async (patch) => Object.assign(state, patch),
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => manager.handlePhonePageDuringStep8(99, state),
+    /已不在 active activations 列表中/
+  );
+  assert.equal(
+    events.some((entry) => entry[0] === 'message' && entry[1] === 'SUBMIT_PHONE_NUMBER'),
+    false,
+    'should not submit phone number when HeroSMS active activation is missing'
+  );
+});
+
+test('handlePhonePageDuringStep8 moves number to standby when phone page rate limits resend', async () => {
+  const firstActivation = {
+    activationId: 301,
+    phoneNumber: '237686822243',
+    country: '37',
+    useCount: 0,
+    lastCode: '',
+  };
+  const secondActivation = {
+    activationId: 302,
+    phoneNumber: '237686822244',
+    country: '37',
+    useCount: 0,
+    lastCode: '',
+  };
+  const state = {
+    heroSmsBaseUrl: 'https://hero-sms.com/stubs/handler_api.php',
+    heroSmsApiKey: 'sk-test',
+    heroSmsService: 'dr',
+    heroSmsCountry: '37',
+    currentHeroSmsActivation: firstActivation,
+    heroSmsLastCode: '',
+    heroSmsRuntimeStatus: '',
+    heroSmsActiveActivations: [],
+    heroSmsActiveActivationsFetchedAt: 0,
+    heroSmsFailedActivations: [],
+    heroSmsPendingSuccessActivationId: 0,
+  };
+  const events = [];
+  let activationIndex = 0;
+  const runtime = {
+    getState: () => state,
+    setState: (patch) => Object.assign(state, patch),
+    ensureActivationReadyForSubmission: async () => {
+      const activation = activationIndex === 0 ? firstActivation : secondActivation;
+      state.currentHeroSmsActivation = activation;
+      return activation;
+    },
+    getCountrySelection: async () => ({ name: '喀麦隆' }),
+    setRuntimeStatus: (status) => events.push(['runtime-status', status]),
+    requestResendForCurrentActivation: async () => {
+      events.push(['hero-resend', activationIndex]);
+      return { response: 'ACCESS_RETRY_GET' };
+    },
+    syncActiveActivations: async () => [activationIndex === 0 ? firstActivation : secondActivation],
+    finalizeActivation: async () => ({ released: false, error: 'HeroSMS setStatus=8 failed' }),
+    moveActivationToStandbyList: async (activation, reason, errorText) => {
+      events.push(['standby', activation.activationId, reason, errorText]);
+      activationIndex += 1;
+      return { activationId: activation.activationId };
+    },
+    waitForCode: async () => ({ code: '654321' }),
+    getCurrentActivation: () => state.currentHeroSmsActivation,
+    getActivationRemainingMs: () => 60_000,
+    mergeCurrentActivation: (patch = {}) => {
+      Object.assign(state.currentHeroSmsActivation, patch);
+      return state.currentHeroSmsActivation;
+    },
+  };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundHeroSms;`)({
+    MultiPageBackgroundHeroSms: null,
+    HeroSmsCore: {
+      createHeroSmsRuntime: () => runtime,
+      DEFAULT_HERO_SMS_BASE_URL: 'https://hero-sms.com/stubs/handler_api.php',
+      HERO_SMS_NUMBER_MAX_USES: 5,
+      HERO_SMS_SMS_POLL_INTERVAL_MS: 5000,
+      HERO_SMS_SMS_TIMEOUT_MS: 180000,
+      HERO_SMS_RESEND_AFTER_MS: 60000,
+      HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT: 3,
+      HERO_SMS_FAILED_ACTIVATION_CLEANUP_DELAY_MS: 2 * 60 * 1000,
+      normalizeHeroSmsBaseUrl: (value) => String(value || '').trim(),
+      normalizeHeroSmsService: (value) => String(value || '').trim().toLowerCase(),
+      normalizeHeroSmsCountry: (value) => String(value || '').trim(),
+    },
+  });
+  const manager = api.createHeroSmsManager({
+    addLog: async (message) => events.push(['log', message]),
+    broadcastDataUpdate: () => {},
+    chrome: { runtime: { getURL: (path) => path } },
+    ensureContentScriptReadyOnTab: async () => {},
+    getState: async () => state,
+    sendTabMessageWithTimeout: async (_tabId, _source, message) => {
+      events.push(['message', message.type, activationIndex]);
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        return {
+          codeEntryReady: true,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'GET_PHONE_VERIFICATION_STATE') {
+        return activationIndex === 0
+          ? {
+            addPhonePage: true,
+            phoneVerificationPage: true,
+            hasCodeTarget: true,
+            errorText: '尝试重新发送的次数过多。请稍后重试。',
+            url: 'https://auth.openai.com/phone-verification',
+          }
+          : {
+            addPhonePage: true,
+            phoneVerificationPage: true,
+            hasCodeTarget: true,
+            errorText: '',
+            url: 'https://auth.openai.com/phone-verification',
+          };
+      }
+      if (message.type === 'FILL_PHONE_VERIFICATION_CODE') {
+        return { success: true };
+      }
+      throw new Error(`Unexpected message: ${message.type}`);
+    },
+    setState: async (patch) => Object.assign(state, patch),
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await manager.handlePhonePageDuringStep8(99, state);
+
+  assert.equal(result.activationId, secondActivation.activationId);
+  assert.deepEqual(events.find((entry) => entry[0] === 'standby')?.slice(1, 3), [
+    firstActivation.activationId,
+    'phone_resend_rate_limited',
+  ]);
+  assert.equal(
+    events.filter((entry) => entry[0] === 'message' && entry[1] === 'SUBMIT_PHONE_NUMBER').length,
+    2,
+    'should retry with a new number after rate limit error'
   );
 });
