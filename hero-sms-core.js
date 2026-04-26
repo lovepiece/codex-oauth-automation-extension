@@ -364,15 +364,81 @@
       return '';
     }
 
-    return String(
+    const primary = String(
       payload.error
+      || payload.title
       || payload.message
       || payload.msg
       || payload.description
+      || payload.details
       || payload.detail
       || payload.status_text
       || ''
     ).trim();
+    const secondary = String(
+      payload.details
+      || payload.detail
+      || payload.description
+      || payload.message
+      || ''
+    ).trim();
+    if (primary && secondary && secondary !== primary) {
+      return `${primary}: ${secondary}`;
+    }
+    if (primary) {
+      return primary;
+    }
+    if (payload.info && typeof payload.info === 'object') {
+      try {
+        return JSON.stringify(payload.info);
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  function parseHeroSmsResponseText(text = '') {
+    const responseText = String(text || '').trim();
+    if (!responseText) {
+      return {
+        text: '',
+        payload: '',
+        isJson: false,
+      };
+    }
+
+    if (/^[{\[]/.test(responseText)) {
+      try {
+        return {
+          text: responseText,
+          payload: JSON.parse(responseText),
+          isJson: true,
+        };
+      } catch {
+        // Treat malformed JSON-like responses as text so callers can surface the raw payload.
+      }
+    }
+
+    return {
+      text: responseText,
+      payload: responseText,
+      isJson: false,
+    };
+  }
+
+  function createHeroSmsApiError(action, responseInfo = {}) {
+    const status = Number(responseInfo.status) || 0;
+    const payload = responseInfo.payload;
+    const text = String(responseInfo.text || '').trim();
+    const errorText = extractHeroSmsErrorText(payload) || text || (status ? `HTTP ${status}` : 'unknown error');
+    const error = new Error(`HeroSMS ${action} request failed: ${errorText}`);
+    error.name = 'HeroSmsApiError';
+    error.action = action;
+    error.status = status;
+    error.responseText = text;
+    error.payload = payload;
+    return error;
   }
 
   function parseHeroSmsNumberResponse(text = '') {
@@ -912,12 +978,8 @@
       };
     }
 
-    async requestText(action, params = {}, config = this.getConfig()) {
+    buildRequestUrl(action, params = {}, config = this.getConfig()) {
       const normalizedConfig = this.ensureApiConfig(config);
-      if (typeof this.fetchImpl !== 'function') {
-        throw new Error('A fetch implementation is required to call HeroSMS APIs.');
-      }
-
       const url = new URL(normalizedConfig.baseUrl);
       url.searchParams.set('action', action);
       url.searchParams.set('api_key', normalizedConfig.apiKey);
@@ -925,6 +987,15 @@
         if (value === undefined || value === null || value === '') continue;
         url.searchParams.set(key, String(value));
       }
+      return url;
+    }
+
+    async request(action, params = {}, config = this.getConfig()) {
+      if (typeof this.fetchImpl !== 'function') {
+        throw new Error('A fetch implementation is required to call HeroSMS APIs.');
+      }
+
+      const url = this.buildRequestUrl(action, params, config);
 
       let response;
       try {
@@ -938,23 +1009,38 @@
         throw new Error(`HeroSMS request failed: ${error.message}`);
       }
 
-      const text = (await response.text()).trim();
+      const responseText = await response.text();
+      const parsed = parseHeroSmsResponseText(responseText);
+      const status = Number(response.status) || 0;
       if (!response.ok) {
-        throw new Error(`HeroSMS request failed: ${text || `HTTP ${response.status}`}`);
+        throw createHeroSmsApiError(action, {
+          status,
+          text: parsed.text,
+          payload: parsed.payload,
+        });
       }
-      if (!text) {
+
+      if (!parsed.text) {
         throw new Error(`HeroSMS ${action} returned an empty response.`);
       }
-      return text;
+
+      return {
+        action,
+        status,
+        text: parsed.text,
+        payload: parsed.payload,
+        isJson: parsed.isJson,
+      };
+    }
+
+    async requestText(action, params = {}, config = this.getConfig()) {
+      const response = await this.request(action, params, config);
+      return response.text;
     }
 
     async requestPayload(action, params = {}, config = this.getConfig()) {
-      const text = await this.requestText(action, params, config);
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
+      const response = await this.request(action, params, config);
+      return response.payload;
     }
 
     async heroSmsGetNumber(options = {}, config = this.getConfig()) {
@@ -1709,6 +1795,7 @@
     parseHeroSmsActiveActivationsResponse,
     parseHeroSmsNumberResponse,
     parseHeroSmsNumberV2Response,
+    parseHeroSmsResponseText,
     parseHeroSmsStructuredStatusResponse,
     parseHeroSmsStatusResponse,
     validateHeroSmsSetStatusResponse,

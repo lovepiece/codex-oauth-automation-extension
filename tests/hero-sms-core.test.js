@@ -132,6 +132,66 @@ test('heroSmsGetNumber sends configured maxPrice to getNumberV2', async () => {
   assert.equal(params.get('service'), 'dr');
   assert.equal(params.get('country'), '187');
   assert.equal(params.get('maxPrice'), '0.5');
+  assert.equal(params.has('fixedPrice'), false);
+});
+
+test('HeroSMS request errors parse JSON error payloads', async () => {
+  const runtime = createHeroSmsRuntime({
+    initialState: {
+      heroSmsBaseUrl: 'https://hero-sms.com/stubs/handler_api.php',
+      heroSmsApiKey: 'sk-test',
+      heroSmsService: 'dr',
+      heroSmsCountry: '187',
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 404,
+      text: async () => JSON.stringify({
+        title: 'NO_NUMBERS',
+        details: 'Numbers Not Found. Try Later',
+      }),
+    }),
+  });
+
+  await assert.rejects(
+    () => runtime.heroSmsGetNumber(),
+    /NO_NUMBERS: Numbers Not Found\. Try Later/
+  );
+});
+
+test('HeroSMS request builder filters empty optional params', async () => {
+  let requestedUrl = '';
+  const runtime = createHeroSmsRuntime({
+    initialState: {
+      heroSmsBaseUrl: 'https://hero-sms.com/stubs/handler_api.php',
+      heroSmsApiKey: 'sk-test',
+      heroSmsService: 'dr',
+      heroSmsCountry: '187',
+    },
+    fetchImpl: async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => 'STATUS_OK:123456',
+      };
+    },
+  });
+
+  const text = await runtime.requestText('getStatus', {
+    id: 123,
+    empty: '',
+    missing: null,
+    ignored: undefined,
+  });
+  const params = new URL(requestedUrl).searchParams;
+
+  assert.equal(text, 'STATUS_OK:123456');
+  assert.equal(params.get('action'), 'getStatus');
+  assert.equal(params.get('id'), '123');
+  assert.equal(params.has('empty'), false);
+  assert.equal(params.has('missing'), false);
+  assert.equal(params.has('ignored'), false);
 });
 
 test('finalizeActivation only uses status 6 for max uses or phone max usage exceeded', async () => {

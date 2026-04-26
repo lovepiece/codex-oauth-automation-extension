@@ -174,6 +174,10 @@ test('hero sms phone verification only clicks page resend after 1 minute timeout
   assert.doesNotMatch(source, /接收短信页面等待 15 秒后仍未收到短信/);
   assert.match(source, /clickPhonePageResendOnce\(tabId, '等待满 1 分钟后额外重发短信'\)/);
   assert.match(source, /shouldTriggerPageResend\(reason, resendAttempt\)/);
+  assert.match(
+    source,
+    /resendPageResult\?\.resent[\s\S]*sleepWithStop\(HERO_SMS_INITIAL_RESEND_DELAY_MS\);[\s\S]*requestFreshSmsBeforeReceive\(`\$\{logPrefix\}后`\)/
+  );
   assert.doesNotMatch(source, /initialPageResend/);
 });
 
@@ -183,7 +187,12 @@ test('hero sms timeout requests step 7 restart after old number cleanup', () => 
   assert.match(source, /等待手机短信超过 3 分钟仍未收到验证码/);
 });
 
-test('hero sms requests fresh sms before receive and counts phone verification success', () => {
+test('hero sms waits 5 seconds before requesting fresh sms and counts phone verification success', () => {
+  assert.match(source, /HERO_SMS_INITIAL_RESEND_DELAY_MS = 5000/);
+  assert.match(
+    source,
+    /sleepWithStop\(HERO_SMS_INITIAL_RESEND_DELAY_MS\);[\s\S]*requestFreshSmsBeforeReceive\('接收短信前'\)/
+  );
   assert.match(source, /requestFreshSmsBeforeReceive\('接收短信前'\)/);
   assert.match(source, /rejectedSmsCodes/);
   assert.match(source, /recordSuccessfulPhoneVerification\(activation\.activationId\)/);
@@ -196,6 +205,22 @@ test('hero sms only completes activation for phone max usage after submit contin
   assert.match(source, /pageError\.afterPhoneSubmit = true/);
   assert.match(source, /reason === 'phone_max_usage_exceeded' && error\?\.afterPhoneSubmit/);
   assert.match(source, /phone_max_usage_exceeded_without_submit_continue/);
+});
+
+test('finalizeAfterSuccessfulFlow does not increment HeroSMS use count again', () => {
+  const finalizeBody = source.match(/async function finalizeAfterSuccessfulFlow\(\) \{([\s\S]*?)\n    async function onAlarm/);
+  assert.ok(finalizeBody, 'should locate finalizeAfterSuccessfulFlow body');
+  assert.doesNotMatch(finalizeBody[1], /useCount \+ 1/);
+  assert.match(finalizeBody[1], /currentUseCount/);
+  assert.match(source, /recordSuccessfulPhoneVerification\(activation\.activationId\)/);
+});
+
+test('HeroSMS failed phone numbers wait before cancel and move 409 conflicts to standby', () => {
+  assert.match(source, /HERO_SMS_CANCEL_REFUND_DELAY_MS = 2 \* 60 \* 1000/);
+  assert.match(source, /sleepWithStop\(HERO_SMS_CANCEL_REFUND_DELAY_MS\);[\s\S]*runtime\.heroSmsSetStatus\(activation\.activationId, 8\)/);
+  assert.match(source, /ACCESS_CANCEL/);
+  assert.match(source, /EARLY_CANCEL_DENIED\|OTP_RECEIVED\|HTTP\\s\*409/);
+  assert.match(source, /moveActivationToStandbyList\(activation, reason/);
 });
 
 test('handlePhonePageDuringStep8 requests a distinct sms after invalid code without resubmitting phone', async () => {
@@ -319,7 +344,7 @@ test('handlePhonePageDuringStep8 requests a distinct sms after invalid code with
   assert.equal(result.code, '222222');
   assert.equal(waitCalls.length, 2);
   assert.deepEqual(waitCalls[1], {
-    excludeCodes: ['111111'],
+    excludeCodes: [],
     requestFreshCodeOnStart: true,
     markReady: false,
   });
@@ -339,6 +364,13 @@ test('handlePhonePageDuringStep8 requests a distinct sms after invalid code with
       .map((entry) => entry[2]),
     ['111111', '222222']
   );
+});
+
+test('HeroSMS invalid sms code retries until a distinct code is received', () => {
+  assert.match(source, /rejectedSmsCodes\.has\(receivedCode\)/);
+  assert.match(source, /与上一次被拒绝的验证码相同/);
+  assert.match(source, /continue;/);
+  assert.match(source, /duplicateError\.invalidCode = true/);
 });
 
 test('auto-run reset preserves current HeroSMS activation for next run', () => {
@@ -466,6 +498,15 @@ test('handlePhonePageDuringStep8 moves number to standby when phone page rate li
       return { response: 'ACCESS_RETRY_GET' };
     },
     syncActiveActivations: async () => [activationIndex === 0 ? firstActivation : secondActivation],
+    heroSmsSetStatus: async () => {
+      const error = new Error('EARLY_CANCEL_DENIED: Activation cannot be cancelled at this time.');
+      error.status = 409;
+      error.responseText = JSON.stringify({
+        title: 'EARLY_CANCEL_DENIED',
+        details: 'Activation cannot be cancelled at this time. Minimum activation period must pass.',
+      });
+      throw error;
+    },
     finalizeActivation: async () => ({ released: false, error: 'HeroSMS setStatus=8 failed' }),
     moveActivationToStandbyList: async (activation, reason, errorText) => {
       events.push(['standby', activation.activationId, reason, errorText]);
