@@ -107,6 +107,7 @@ const inputHeroSmsBaseUrl = document.getElementById('input-hero-sms-base-url');
 const inputHeroSmsApiKey = document.getElementById('input-hero-sms-api-key');
 const inputHeroSmsService = document.getElementById('input-hero-sms-service');
 const inputHeroSmsCountry = document.getElementById('input-hero-sms-country');
+const inputHeroSmsMaxPrice = document.getElementById('input-hero-sms-max-price');
 const displayHeroSmsPhone = document.getElementById('display-hero-sms-phone');
 const displayHeroSmsRemaining = document.getElementById('display-hero-sms-remaining');
 const displayHeroSmsUsage = document.getElementById('display-hero-sms-usage');
@@ -1253,6 +1254,16 @@ function normalizeHeroSmsCountryValue(value = '') {
   return String(Math.max(0, Number(rawValue)));
 }
 
+function normalizeHeroSmsMaxPriceValue(value = '') {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  const price = Number(normalized);
+  if (!Number.isFinite(price) || price <= 0) {
+    return '';
+  }
+  return normalized;
+}
+
 function normalizeHeroSmsActivationState(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -1955,6 +1966,7 @@ function collectSettingsPayload() {
     heroSmsApiKey: inputHeroSmsApiKey.value,
     heroSmsService: normalizeHeroSmsServiceValue(inputHeroSmsService.value),
     heroSmsCountry: normalizeHeroSmsCountryValue(inputHeroSmsCountry.value),
+    heroSmsMaxPrice: normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value),
     luckmailApiKey: inputLuckmailApiKey.value,
     luckmailBaseUrl: normalizeLuckmailBaseUrl(inputLuckmailBaseUrl.value),
     luckmailEmailType: normalizeLuckmailEmailType(selectLuckmailEmailType.value),
@@ -2365,6 +2377,9 @@ function applySettingsState(state) {
   inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
   inputHeroSmsService.value = state?.heroSmsService || '';
   inputHeroSmsCountry.value = state?.heroSmsCountry || '';
+  if (inputHeroSmsMaxPrice) {
+    inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice);
+  }
   inputLuckmailApiKey.value = state?.luckmailApiKey || '';
   inputLuckmailBaseUrl.value = normalizeLuckmailBaseUrl(state?.luckmailBaseUrl);
   selectLuckmailEmailType.value = normalizeLuckmailEmailType(state?.luckmailEmailType);
@@ -4168,7 +4183,7 @@ inputVpsPassword.addEventListener('blur', () => {
   });
 });
 
-[inputHeroSmsBaseUrl, inputHeroSmsApiKey, inputHeroSmsService, inputHeroSmsCountry].forEach((input) => {
+[inputHeroSmsBaseUrl, inputHeroSmsApiKey, inputHeroSmsService, inputHeroSmsCountry, inputHeroSmsMaxPrice].forEach((input) => {
   input?.addEventListener('input', () => {
     markSettingsDirty(true);
     scheduleSettingsAutoSave();
@@ -4191,6 +4206,11 @@ inputHeroSmsService?.addEventListener('blur', () => {
 
 inputHeroSmsCountry?.addEventListener('blur', () => {
   inputHeroSmsCountry.value = normalizeHeroSmsCountryValue(inputHeroSmsCountry.value);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHeroSmsMaxPrice?.addEventListener('blur', () => {
+  inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice.value);
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -4830,6 +4850,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.heroSmsCountry !== undefined) {
         inputHeroSmsCountry.value = message.payload.heroSmsCountry || '';
+      }
+      if (message.payload.heroSmsMaxPrice !== undefined && inputHeroSmsMaxPrice) {
+        inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(message.payload.heroSmsMaxPrice);
       }
       if (message.payload.currentHotmailAccountId !== undefined || message.payload.hotmailAccounts !== undefined) {
         renderHotmailAccounts();

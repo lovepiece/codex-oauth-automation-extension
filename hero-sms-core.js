@@ -70,6 +70,14 @@
     return String(Math.max(0, Number(rawValue)));
   }
 
+  function normalizeHeroSmsMaxPrice(value = '') {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return '';
+    const price = Number(normalized);
+    if (!Number.isFinite(price) || price <= 0) return '';
+    return normalized;
+  }
+
   function normalizeHeroSmsCountryCatalogEntry(value = null) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
@@ -337,6 +345,7 @@
       heroSmsApiKey: String(state.heroSmsApiKey || '').trim(),
       heroSmsService: normalizeHeroSmsService(state.heroSmsService),
       heroSmsCountry: normalizeHeroSmsCountry(state.heroSmsCountry),
+      heroSmsMaxPrice: normalizeHeroSmsMaxPrice(state.heroSmsMaxPrice),
       currentHeroSmsActivation: normalizeHeroSmsActivation(state.currentHeroSmsActivation, now),
       heroSmsLastCode: String(state.heroSmsLastCode || '').trim(),
       heroSmsRuntimeStatus: String(state.heroSmsRuntimeStatus || '').trim(),
@@ -430,12 +439,72 @@
     };
   }
 
-  function parseHeroSmsStatusResponse(text = '') {
-    const [status, code = ''] = String(text || '').split(':', 2);
+  function normalizeHeroSmsDateTime(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized || normalized === '0000-00-00 00:00:00') {
+      return '';
+    }
+    return normalized;
+  }
+
+  function parseHeroSmsStructuredStatusResponse(payload = null) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+
+    const sms = payload.sms && typeof payload.sms === 'object' && !Array.isArray(payload.sms)
+      ? payload.sms
+      : null;
+    const call = payload.call && typeof payload.call === 'object' && !Array.isArray(payload.call)
+      ? payload.call
+      : null;
+    const smsCode = String(sms?.code || '').trim();
+    const callCode = String(call?.code || '').trim();
+    const code = smsCode || callCode;
+    const status = String(payload.status || payload.state || '').trim() || (code ? 'STATUS_OK' : '');
+
+    return {
+      status,
+      code,
+      raw: JSON.stringify(payload),
+      verificationType: Number(payload.verificationType) || 0,
+      smsCode,
+      smsText: String(sms?.text || '').trim(),
+      smsDateTime: normalizeHeroSmsDateTime(sms?.dateTime),
+      callCode,
+      callText: String(call?.text || '').trim(),
+      callDateTime: normalizeHeroSmsDateTime(call?.dateTime),
+      callFrom: String(call?.from || '').trim(),
+      callUrl: String(call?.url || '').trim(),
+      callParsingCount: Number(call?.parsingCount) || 0,
+    };
+  }
+
+  function parseHeroSmsStatusResponse(payload = '') {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const structured = parseHeroSmsStructuredStatusResponse(payload);
+      if (structured) {
+        return structured;
+      }
+    }
+
+    const text = String(payload || '').trim();
+    if (/^[{\[]/.test(text)) {
+      try {
+        const structured = parseHeroSmsStructuredStatusResponse(JSON.parse(text));
+        if (structured) {
+          return structured;
+        }
+      } catch {
+        // Fall through to the legacy text protocol parser.
+      }
+    }
+
+    const [status, code = ''] = text.split(':', 2);
     return {
       status: String(status || '').trim(),
       code: String(code || '').trim(),
-      raw: String(text || '').trim(),
+      raw: text,
     };
   }
 
@@ -529,6 +598,12 @@
     throw new Error(`HeroSMS setStatus(${normalizedStatusCode}) returned an error: ${errorText}`);
   }
 
+  function shouldHeroSmsCompleteActivation(activation, releaseReason = '') {
+    const normalizedUseCount = Math.max(0, Math.floor(Number(activation?.useCount) || 0));
+    return normalizedUseCount >= HERO_SMS_NUMBER_MAX_USES
+      || String(releaseReason || '').trim() === 'phone_max_usage_exceeded';
+  }
+
   function defaultSleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -608,6 +683,7 @@
         heroSmsApiKey: config.apiKey ?? this.state.heroSmsApiKey,
         heroSmsService: config.service ?? this.state.heroSmsService,
         heroSmsCountry: config.country ?? this.state.heroSmsCountry,
+        heroSmsMaxPrice: config.maxPrice ?? this.state.heroSmsMaxPrice,
       });
     }
 
@@ -617,6 +693,7 @@
         apiKey: String(state.heroSmsApiKey || '').trim(),
         service: normalizeHeroSmsService(state.heroSmsService),
         country: normalizeHeroSmsCountry(state.heroSmsCountry),
+        maxPrice: normalizeHeroSmsMaxPrice(state.heroSmsMaxPrice),
       };
     }
 
@@ -886,7 +963,7 @@
         service: normalizedConfig.service,
         country: normalizedConfig.country,
         operator: options.operator,
-        maxPrice: options.maxPrice,
+        maxPrice: options.maxPrice ?? normalizedConfig.maxPrice,
         fixedPrice: options.fixedPrice,
         ref: options.ref,
         phoneException: options.phoneException,
@@ -901,8 +978,8 @@
     }
 
     async heroSmsGetStatus(activationId, config = this.getConfig()) {
-      const text = await this.requestText('getStatus', { id: activationId }, config);
-      return parseHeroSmsStatusResponse(text);
+      const payload = await this.requestPayload('getStatusV2', { id: activationId }, config);
+      return parseHeroSmsStatusResponse(payload);
     }
 
     async heroSmsSetStatus(activationId, status, config = this.getConfig()) {
@@ -960,7 +1037,7 @@
       }
 
       const config = this.getConfig(options.state || this.state);
-      const releaseMode = options.preferComplete || normalizedActivation.useCount >= HERO_SMS_NUMBER_MAX_USES
+      const releaseMode = shouldHeroSmsCompleteActivation(normalizedActivation, options.releaseReason)
         ? 'complete'
         : 'cancel';
 
@@ -1037,6 +1114,7 @@
         const releaseResult = await this.attemptActivationRelease(item, {
           state: currentState,
           preferComplete: item.useCount >= HERO_SMS_NUMBER_MAX_USES,
+          releaseReason: item.useCount >= HERO_SMS_NUMBER_MAX_USES ? 'max_uses_reached' : 'expired_standby_activation',
         });
         if (releaseResult.released) {
           this.emitLog(
@@ -1177,6 +1255,7 @@
       const releaseResult = await this.attemptActivationRelease(activation, {
         state,
         preferComplete,
+        releaseReason,
       });
       if (!releaseResult.released) {
         if (!silent) {
@@ -1433,7 +1512,7 @@
       };
 
       try {
-        const shouldComplete = target.reason === 'phone_max_usage_exceeded' || target.useCount >= HERO_SMS_NUMBER_MAX_USES;
+        const shouldComplete = shouldHeroSmsCompleteActivation(target, target.reason);
         if (shouldComplete) {
           const finishResponse = await this.heroSmsReleaseActivation(target.activationId, 'complete', config);
           nextPatch = {
@@ -1452,12 +1531,9 @@
               cleanupCompletedAt: this.now(),
             };
           } catch (cancelError) {
-            const finishResponse = await this.heroSmsReleaseActivation(target.activationId, 'complete', config);
             nextPatch = {
               ...nextPatch,
-              status: 'completed',
-              cleanupResponse: finishResponse,
-              cleanupCompletedAt: this.now(),
+              status: 'cleanup_failed',
               cleanupError: cancelError.message,
             };
           }
@@ -1572,6 +1648,11 @@
             ok: true,
             code: deliveredCode,
             raw: status.raw,
+            smsText: status.smsText || '',
+            smsDateTime: status.smsDateTime || '',
+            callText: status.callText || '',
+            callDateTime: status.callDateTime || '',
+            verificationType: Number(status.verificationType) || 0,
           };
         }
 
@@ -1620,6 +1701,7 @@
     normalizeHeroSmsCountryCatalogEntry,
     normalizeHeroSmsFailedActivation,
     normalizeHeroSmsFailedActivationList,
+    normalizeHeroSmsMaxPrice,
     normalizeHeroSmsService,
     normalizeHeroSmsStandbyActivation,
     normalizeHeroSmsStandbyActivationList,
@@ -1627,6 +1709,7 @@
     parseHeroSmsActiveActivationsResponse,
     parseHeroSmsNumberResponse,
     parseHeroSmsNumberV2Response,
+    parseHeroSmsStructuredStatusResponse,
     parseHeroSmsStatusResponse,
     validateHeroSmsSetStatusResponse,
     firstNonEmptyString,

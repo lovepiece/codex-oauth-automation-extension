@@ -281,6 +281,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   heroSmsApiKey: '',
   heroSmsService: '',
   heroSmsCountry: '',
+  heroSmsMaxPrice: '',
   cloudflareDomain: '',
   cloudflareDomains: [],
   cloudflareTempEmailBaseUrl: '',
@@ -883,6 +884,14 @@ function normalizeHeroSmsCountry(value = '') {
   if (!rawValue) return '';
   if (!/^\d+$/.test(rawValue)) return '';
   return String(Math.max(0, Number(rawValue)));
+}
+
+function normalizeHeroSmsMaxPrice(value = '') {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  const price = Number(normalized);
+  if (!Number.isFinite(price) || price <= 0) return '';
+  return normalized;
 }
 
 function normalizeHeroSmsCountryCatalogEntry(value = null) {
@@ -1875,7 +1884,7 @@ async function heroSmsGetNumber(config, options = {}) {
     service: config.service,
     country: config.country,
     operator: options.operator,
-    maxPrice: options.maxPrice,
+    maxPrice: options.maxPrice ?? config.maxPrice,
     fixedPrice: options.fixedPrice,
     ref: options.ref,
     phoneException: options.phoneException,
@@ -1934,6 +1943,12 @@ function validateHeroSmsSetStatusResponse(statusCode, responseText = '') {
   throw new Error(`HeroSMS setStatus(${normalizedStatusCode}) 返回异常：${errorText}`);
 }
 
+function shouldHeroSmsCompleteActivation(activation, releaseReason = '') {
+  const normalizedUseCount = Math.max(0, Math.floor(Number(activation?.useCount) || 0));
+  return normalizedUseCount >= HERO_SMS_NUMBER_MAX_USES
+    || String(releaseReason || '').trim() === 'phone_max_usage_exceeded';
+}
+
 async function heroSmsSetActivationReady(config, activationId) {
   const response = await heroSmsSetStatus(config, activationId, 1);
   return validateHeroSmsSetStatusResponse(1, response);
@@ -1980,7 +1995,7 @@ async function attemptHeroSmsActivationRelease(activation, options = {}) {
     ? options.state
     : await getState();
   const config = getHeroSmsConfig(state);
-  const releaseMode = options.preferComplete || normalizedActivation.useCount >= HERO_SMS_NUMBER_MAX_USES
+  const releaseMode = shouldHeroSmsCompleteActivation(normalizedActivation, options.releaseReason)
     ? 'complete'
     : 'cancel';
 
@@ -2049,6 +2064,7 @@ async function cleanupExpiredHeroSmsStandbyActivations(state) {
     const releaseResult = await attemptHeroSmsActivationRelease(item, {
       state: currentState,
       preferComplete: item.useCount >= HERO_SMS_NUMBER_MAX_USES,
+      releaseReason: item.useCount >= HERO_SMS_NUMBER_MAX_USES ? 'max_uses_reached' : 'expired_standby_activation',
     });
     if (releaseResult.released) {
       await addLog(
@@ -2251,6 +2267,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHotmailRemoteBaseUrl(value);
     case 'hotmailLocalBaseUrl':
       return normalizeHotmailLocalBaseUrl(value);
+    case 'heroSmsMaxPrice':
+      return normalizeHeroSmsMaxPrice(value);
     case 'cloudflareDomain':
       return normalizeCloudflareDomain(value);
     case 'cloudflareDomains':

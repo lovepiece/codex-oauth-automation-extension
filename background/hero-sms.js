@@ -14,9 +14,11 @@
     normalizeHeroSmsBaseUrl = (value) => String(value || '').trim(),
     normalizeHeroSmsService = (value) => String(value || '').trim().toLowerCase(),
     normalizeHeroSmsCountry = (value) => String(value || '').trim(),
+    normalizeHeroSmsMaxPrice = (value) => String(value || '').trim(),
   } = HeroSmsCore;
 
   const HERO_SMS_FAILED_ACTIVATION_ALARM_PREFIX = 'hero-sms-failed-cleanup:';
+  const HERO_SMS_INVALID_CODE_RETRY_LIMIT = 3;
 
   function createHeroSmsManager(deps = {}) {
     const {
@@ -65,6 +67,7 @@
         heroSmsApiKey: state.heroSmsApiKey || '',
         heroSmsService: state.heroSmsService || '',
         heroSmsCountry: state.heroSmsCountry || '',
+        heroSmsMaxPrice: state.heroSmsMaxPrice || '',
         currentHeroSmsActivation: state.currentHeroSmsActivation || null,
         heroSmsLastCode: state.heroSmsLastCode || '',
         heroSmsRuntimeStatus: state.heroSmsRuntimeStatus || '',
@@ -101,6 +104,7 @@
         heroSmsApiKey: String(state.heroSmsApiKey || '').trim(),
         heroSmsService: normalizeHeroSmsService(state.heroSmsService),
         heroSmsCountry: normalizeHeroSmsCountry(state.heroSmsCountry),
+        heroSmsMaxPrice: normalizeHeroSmsMaxPrice(state.heroSmsMaxPrice),
         currentHeroSmsActivation: state.currentHeroSmsActivation || null,
         heroSmsLastCode: state.heroSmsLastCode || '',
         heroSmsRuntimeStatus: state.heroSmsRuntimeStatus || '',
@@ -424,6 +428,9 @@
 
       const pageError = new Error(errorText);
       pageError.errorText = errorText;
+      if (String(actionLabel || '').trim() === '提交手机号后') {
+        pageError.afterPhoneSubmit = true;
+      }
       if (shouldRetryWithFreshNumber(pageError)) {
         throw pageError;
       }
@@ -459,6 +466,7 @@
           if (submitResult?.errorText) {
             const submitError = new Error(submitResult.errorText);
             submitError.errorText = submitResult.errorText;
+            submitError.afterPhoneSubmit = true;
             throw submitError;
           }
           if (!submitResult?.phoneVerificationPage || !submitResult?.codeEntryReady) {
@@ -498,47 +506,71 @@
             }
           }
 
-          const smsResult = await runtime.waitForCode(activation, {
-            pollIntervalMs: HERO_SMS_SMS_POLL_INTERVAL_MS,
-            timeoutMs: HERO_SMS_SMS_TIMEOUT_MS,
-            resendAfterMs: HERO_SMS_RESEND_AFTER_MS,
-            requestFreshCodeOnStart: false,
-            excludeCodes: activation.lastCode ? [activation.lastCode] : [],
-            maxResendAttempts: Math.max(1, Math.floor(HERO_SMS_SMS_TIMEOUT_MS / HERO_SMS_RESEND_AFTER_MS)),
-            onResend: async ({ attempt: resendAttempt, reason }) => {
-              const reasonText = reason === 'initial' ? '准备下一轮复用' : '等待新短信超时';
-              await addLog?.(`步骤 9：${reasonText}，正在通过 HeroSMS API 请求新的手机号验证码（第 ${resendAttempt} 次）...`, 'warn');
-              await throwIfPhoneVerificationPageRequiresFreshNumber(tabId, '请求重发前');
+          const rejectedSmsCodes = new Set(activation.lastCode ? [activation.lastCode] : []);
+          let smsResult = null;
+          let fillResult = null;
 
-              if (shouldTriggerPageResend(reason, resendAttempt)) {
-                try {
-                  const resendPageResult = await clickPhonePageResendOnce(tabId, '等待满 1 分钟后额外重发短信');
-                  if (resendPageResult?.heroSmsResendRequested) {
-                    return;
+          for (let codeAttempt = 1; codeAttempt <= HERO_SMS_INVALID_CODE_RETRY_LIMIT + 1; codeAttempt += 1) {
+            const retryAfterRejectedCode = codeAttempt > 1;
+            smsResult = await runtime.waitForCode(activation, {
+              pollIntervalMs: HERO_SMS_SMS_POLL_INTERVAL_MS,
+              timeoutMs: HERO_SMS_SMS_TIMEOUT_MS,
+              resendAfterMs: HERO_SMS_RESEND_AFTER_MS,
+              requestFreshCodeOnStart: retryAfterRejectedCode,
+              markReady: !retryAfterRejectedCode,
+              excludeCodes: [...rejectedSmsCodes],
+              maxResendAttempts: Math.max(1, Math.floor(HERO_SMS_SMS_TIMEOUT_MS / HERO_SMS_RESEND_AFTER_MS)),
+              onResend: async ({ attempt: resendAttempt, reason }) => {
+                const reasonText = reason === 'initial'
+                  ? (retryAfterRejectedCode ? '验证码被页面拒绝后请求新短信' : '准备下一轮复用')
+                  : '等待新短信超时';
+                await addLog?.(`步骤 9：${reasonText}，正在通过 HeroSMS API 请求新的手机号验证码（第 ${resendAttempt} 次）...`, 'warn');
+                await throwIfPhoneVerificationPageRequiresFreshNumber(tabId, '请求重发前');
+
+                if (shouldTriggerPageResend(reason, resendAttempt)) {
+                  try {
+                    const resendPageResult = await clickPhonePageResendOnce(tabId, '等待满 1 分钟后额外重发短信');
+                    if (resendPageResult?.heroSmsResendRequested) {
+                      return;
+                    }
+                  } catch (resendErr) {
+                    if (shouldRetryWithFreshNumber(resendErr)) {
+                      throw resendErr;
+                    }
+                    await addLog?.(`步骤 9：等待 1 分钟后的页面重发尝试失败：${resendErr.message}`, 'warn');
                   }
-                } catch (resendErr) {
-                  if (shouldRetryWithFreshNumber(resendErr)) {
-                    throw resendErr;
-                  }
-                  await addLog?.(`步骤 9：等待 1 分钟后的页面重发尝试失败：${resendErr.message}`, 'warn');
                 }
-              }
 
-              await requestFreshSmsBeforeReceive('HeroSMS 轮询等待 60 秒后');
-            },
-          });
-          await syncRuntimeToExtension();
+                await requestFreshSmsBeforeReceive('HeroSMS 轮询等待 60 秒后');
+              },
+            });
+            await syncRuntimeToExtension();
 
-          runtime.setRuntimeStatus(`已收到验证码 ${smsResult.code}，正在回填页面`);
-          await syncRuntimeToExtension();
-          await addLog?.(`步骤 9：已从 HeroSMS 收到短信验证码 ${smsResult.code}，正在回填到手机号页面...`, 'ok');
+            runtime.setRuntimeStatus(`已收到验证码 ${smsResult.code}，正在回填页面`);
+            await syncRuntimeToExtension();
+            await addLog?.(`步骤 9：已从 HeroSMS 收到短信验证码 ${smsResult.code}，正在回填到手机号页面...`, 'ok');
 
-          const fillResult = await fillPhoneVerificationCode(tabId, smsResult.code);
-          if (fillResult?.invalidCode) {
+            fillResult = await fillPhoneVerificationCode(tabId, smsResult.code);
+            if (!fillResult?.invalidCode) {
+              break;
+            }
+
+            const rejectedCode = String(smsResult.code || '').trim();
+            if (rejectedCode) {
+              rejectedSmsCodes.add(rejectedCode);
+            }
+
             const fillError = new Error(fillResult.errorText || `短信验证码 ${smsResult.code} 被页面拒绝`);
             fillError.errorText = fillResult.errorText || fillError.message;
             fillError.invalidCode = true;
-            throw fillError;
+            if (codeAttempt > HERO_SMS_INVALID_CODE_RETRY_LIMIT) {
+              throw fillError;
+            }
+
+            await addLog?.(
+              `步骤 9：手机号页面拒绝验证码 ${smsResult.code}，不会重新提交手机号，正在通过 HeroSMS setStatus=3 获取不同的新短信验证码...`,
+              'warn'
+            );
           }
 
           await recordSuccessfulPhoneVerification(activation.activationId);
@@ -548,6 +580,11 @@
             ok: true,
             activationId: activation.activationId,
             code: smsResult.code,
+            smsText: smsResult.smsText || '',
+            smsDateTime: smsResult.smsDateTime || '',
+            callText: smsResult.callText || '',
+            callDateTime: smsResult.callDateTime || '',
+            verificationType: Number(smsResult.verificationType) || 0,
             submitResult,
             fillResult,
           };
@@ -564,18 +601,30 @@
             await addLog?.(`步骤 9：检测到${getFailureLabel(reason)}，当前 HeroSMS 号码 ${latestActivation.phoneNumber} 不再复用，正在申请新号码（${attempt}/${HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT}）...`, 'warn');
             try {
               const failureText = String(error?.errorText || error?.message || '').trim();
-              if (reason === 'phone_max_usage_exceeded') {
+              if (reason === 'phone_max_usage_exceeded' && error?.afterPhoneSubmit) {
                 const releaseResult = await finalizeActivation({ preferComplete: true, releaseReason: reason, silent: false });
                 if (releaseResult.released) {
                   await addLog?.(`步骤 9：号码 ${latestActivation.phoneNumber}（ID ${latestActivation.activationId}）触发验证次数 Max 上限，已通过 HeroSMS setStatus=6 完成并释放。`, 'warn');
                 }
-              } else if (reason === 'phone_resend_rate_limited' || reason === 'hero_sms_wait_code_timeout' || reason === 'phone_sms_unavailable') {
-                const releaseResult = await finalizeActivation({ preferComplete: false, releaseReason: reason, silent: false });
+              } else if (reason === 'phone_max_usage_exceeded'
+                || reason === 'phone_resend_rate_limited'
+                || reason === 'hero_sms_wait_code_timeout'
+                || reason === 'phone_sms_unavailable') {
+                const releaseReason = reason === 'phone_max_usage_exceeded'
+                  ? 'phone_max_usage_exceeded_without_submit_continue'
+                  : reason;
+                const releaseResult = await finalizeActivation({ preferComplete: false, releaseReason, silent: false });
                 if (releaseResult.released) {
-                  const label = reason === 'phone_resend_rate_limited' ? '请求次数过多' : reason === 'phone_sms_unavailable' ? '无法接收短信' : '等待验证码超时';
+                  const label = reason === 'phone_resend_rate_limited'
+                    ? '请求次数过多'
+                    : reason === 'phone_sms_unavailable'
+                      ? '无法接收短信'
+                      : reason === 'phone_max_usage_exceeded'
+                        ? '非提交手机号阶段触发 Max 上限'
+                        : '等待验证码超时';
                   await addLog?.(`步骤 9：号码 ${latestActivation.phoneNumber}（ID ${latestActivation.activationId}）${label}，已通过 HeroSMS setStatus=8 取消并释放，准备使用新号码。`, 'warn');
                 } else {
-                  const standbyEntry = await moveActivationToStandbyList(latestActivation, reason, releaseResult.error || failureText || 'HeroSMS setStatus=8 释放失败');
+                  const standbyEntry = await moveActivationToStandbyList(latestActivation, releaseReason, releaseResult.error || failureText || 'HeroSMS setStatus=8 释放失败');
                   if (standbyEntry) {
                     await addLog?.(`步骤 9：号码 ${latestActivation.phoneNumber}（ID ${latestActivation.activationId}）释放失败，已移入备用列表，5 分钟后重试复用，直到 Max 上限或过期自动释放。`, 'warn');
                   } else {
