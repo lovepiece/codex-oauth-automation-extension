@@ -133,6 +133,8 @@
       expiresAt,
       useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
       lastCode: String(value.lastCode || '').trim(),
+      lastSmsDateTime: normalizeHeroSmsDateTime(value.lastSmsDateTime ?? value.smsDateTime ?? value.receiveSmsDate),
+      lastCallDateTime: normalizeHeroSmsDateTime(value.lastCallDateTime ?? value.callDateTime),
       lastStatus: String(value.lastStatus || '').trim(),
       lastStatusAt: Number(value.lastStatusAt) || 0,
       resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
@@ -270,6 +272,7 @@
       expiresAt,
       smsCode: String(value.smsCode ?? value.code ?? '').trim(),
       smsText: String(value.smsText ?? value.text ?? '').trim(),
+      smsDateTime: normalizeHeroSmsDateTime(value.smsDateTime ?? value.receiveSmsDate),
       cost: String(value.activationCost ?? value.cost ?? '').trim(),
       raw: value,
     };
@@ -619,21 +622,61 @@
     return String(status || '').trim().toUpperCase() === 'STATUS_CANCEL';
   }
 
-  function extractHeroSmsDeliveredCode(status) {
+  function extractHeroSmsCodeDigits(value = '') {
+    const match = String(value || '').trim().match(/\d{4,8}/);
+    return match ? match[0] : '';
+  }
+
+  function extractHeroSmsDeliveredMessage(status) {
     const parsed = status && typeof status === 'object'
       ? status
       : parseHeroSmsStatusResponse(status);
     if (!isHeroSmsDeliveredStatus(parsed?.status)) {
-      return '';
+      return {
+        code: '',
+        dateTime: '',
+        channel: '',
+      };
     }
 
-    const codeText = String(parsed?.code || '').trim();
-    if (!codeText) {
-      return '';
+    const candidates = [
+      {
+        code: parsed?.smsCode,
+        dateTime: parsed?.smsDateTime,
+        channel: 'sms',
+      },
+      {
+        code: parsed?.callCode,
+        dateTime: parsed?.callDateTime,
+        channel: 'call',
+      },
+      {
+        code: parsed?.code,
+        dateTime: parsed?.smsDateTime || parsed?.callDateTime || '',
+        channel: parsed?.smsDateTime ? 'sms' : (parsed?.callDateTime ? 'call' : ''),
+      },
+    ];
+
+    for (const candidate of candidates) {
+      const code = extractHeroSmsCodeDigits(candidate.code);
+      if (code) {
+        return {
+          code,
+          dateTime: normalizeHeroSmsDateTime(candidate.dateTime),
+          channel: candidate.channel,
+        };
+      }
     }
 
-    const match = codeText.match(/\d{4,8}/);
-    return match ? match[0] : '';
+    return {
+      code: '',
+      dateTime: '',
+      channel: '',
+    };
+  }
+
+  function extractHeroSmsDeliveredCode(status) {
+    return extractHeroSmsDeliveredMessage(status).code;
   }
 
   function validateHeroSmsSetStatusResponse(statusCode, responseText = '') {
@@ -1312,6 +1355,8 @@
         country: candidate.country || config.country,
         acquiredAt: candidate.acquiredAt || this.now(),
         expiresAt: candidate.expiresAt || ((candidate.acquiredAt || this.now()) + HERO_SMS_ACTIVATION_TTL_MS),
+        lastCode: candidate.smsCode || '',
+        lastSmsDateTime: candidate.smsDateTime || '',
         lastStatus: candidate.status,
       });
       this.setRuntimeStatus(`Restored remote active number ${activation.phoneNumber}`);
@@ -1651,6 +1696,7 @@
 
     async waitForCode(activation, options = {}) {
       const config = this.ensureConfig(this.getConfig());
+      const storedActivation = this.getCurrentActivation();
       let currentActivation = normalizeHeroSmsActivation(
         activation || this.getCurrentActivation(),
         this.now()
@@ -1665,6 +1711,14 @@
       const resendAfterMs = Number(options.resendAfterMs) || HERO_SMS_RESEND_AFTER_MS;
       const excludeCodes = new Set((options.excludeCodes || []).map((item) => String(item || '').trim()).filter(Boolean));
       const requestFreshCodeOnStart = Boolean(options.requestFreshCodeOnStart);
+      const baselineActivation = normalizeHeroSmsActivation(storedActivation || currentActivation, this.now()) || currentActivation;
+      const requireFreshCodeByDateTime = Boolean(options.requireFreshCodeByDateTime);
+      const freshSmsAfterDateTime = normalizeHeroSmsDateTime(
+        options.freshSmsAfterDateTime ?? baselineActivation?.lastSmsDateTime
+      );
+      const freshCallAfterDateTime = normalizeHeroSmsDateTime(
+        options.freshCallAfterDateTime ?? baselineActivation?.lastCallDateTime
+      );
       const resendCallback = typeof options.onResend === 'function' ? options.onResend : null;
       const start = this.now();
       const maxResendAttempts = Math.max(
@@ -1721,11 +1775,23 @@
           lastStatusAt: this.now(),
         }) || currentActivation;
 
-        const deliveredCode = extractHeroSmsDeliveredCode(status);
-        if (deliveredCode && !excludeCodes.has(deliveredCode)) {
+        const deliveredMessage = extractHeroSmsDeliveredMessage(status);
+        const deliveredCode = deliveredMessage.code;
+        const previousMessageDateTime = deliveredMessage.channel === 'call'
+          ? freshCallAfterDateTime
+          : freshSmsAfterDateTime;
+        const isPreviousMessage = requireFreshCodeByDateTime
+          && deliveredMessage.dateTime
+          && previousMessageDateTime
+          && deliveredMessage.dateTime === previousMessageDateTime;
+        if (deliveredCode && isPreviousMessage) {
+          this.setRuntimeStatus(`Waiting for a newer SMS than ${deliveredMessage.dateTime}.`);
+        } else if (deliveredCode && !excludeCodes.has(deliveredCode)) {
           this.setLastCode(deliveredCode);
           currentActivation = this.mergeCurrentActivation({
             lastCode: deliveredCode,
+            lastSmsDateTime: status.smsDateTime || currentActivation.lastSmsDateTime || '',
+            lastCallDateTime: status.callDateTime || currentActivation.lastCallDateTime || '',
             lastStatus: status.raw,
             lastStatusAt: this.now(),
           }) || currentActivation;

@@ -580,12 +580,20 @@
 
           for (let codeAttempt = 1; codeAttempt <= HERO_SMS_INVALID_CODE_RETRY_LIMIT + 1; codeAttempt += 1) {
             const retryAfterRejectedCode = codeAttempt > 1;
+            const activationBeforeWait = runtime.getCurrentActivation?.() || activation;
             smsResult = await runtime.waitForCode(activation, {
               pollIntervalMs: HERO_SMS_SMS_POLL_INTERVAL_MS,
               timeoutMs: HERO_SMS_SMS_TIMEOUT_MS,
               resendAfterMs: HERO_SMS_RESEND_AFTER_MS,
               requestFreshCodeOnStart: retryAfterRejectedCode,
               markReady: !retryAfterRejectedCode,
+              requireFreshCodeByDateTime: Boolean(
+                retryAfterRejectedCode
+                || activationBeforeWait?.lastSmsDateTime
+                || activationBeforeWait?.lastCallDateTime
+              ),
+              freshSmsAfterDateTime: activationBeforeWait?.lastSmsDateTime || '',
+              freshCallAfterDateTime: activationBeforeWait?.lastCallDateTime || '',
               excludeCodes: [],
               maxResendAttempts: Math.max(1, Math.floor(HERO_SMS_SMS_TIMEOUT_MS / HERO_SMS_RESEND_AFTER_MS)),
               onResend: async ({ attempt: resendAttempt, reason }) => {

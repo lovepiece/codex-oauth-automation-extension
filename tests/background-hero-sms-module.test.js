@@ -264,6 +264,9 @@ test('handlePhonePageDuringStep8 requests a distinct sms after invalid code with
         excludeCodes: options.excludeCodes,
         requestFreshCodeOnStart: options.requestFreshCodeOnStart,
         markReady: options.markReady,
+        requireFreshCodeByDateTime: options.requireFreshCodeByDateTime,
+        freshSmsAfterDateTime: options.freshSmsAfterDateTime,
+        freshCallAfterDateTime: options.freshCallAfterDateTime,
       });
       if (options.requestFreshCodeOnStart) {
         await options.onResend?.({
@@ -347,6 +350,9 @@ test('handlePhonePageDuringStep8 requests a distinct sms after invalid code with
     excludeCodes: [],
     requestFreshCodeOnStart: true,
     markReady: false,
+    requireFreshCodeByDateTime: true,
+    freshSmsAfterDateTime: '',
+    freshCallAfterDateTime: '',
   });
   assert.equal(
     events.filter((entry) => entry[0] === 'message' && entry[1] === 'SUBMIT_PHONE_NUMBER').length,

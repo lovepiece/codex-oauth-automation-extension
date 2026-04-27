@@ -163,6 +163,8 @@ curl 'https://hero-sms.com/stubs/handler_api.php?action=getStatusV2&id=316213614
 | sms.text | 完整短信正文 |
 | call | 电话验证结果；没有电话验证时为 `null` |
 
+注意：调用 `setStatus=3` 请求新短信后，轮询 `getStatusV2` 时应先比较 `sms.dateTime` 是否相对上一条短信发生变化。`dateTime` 一致时仍视为上一条短信结果，不能只因为 `sms.code` 出现或变化就当作新短信。只有 `dateTime` 更新后，才继续判断验证码是否与上一次不同。
+
 ## 4. 获取激活状态 getStatus
 
 用途：查询激活订单状态，返回旧版字符串格式。

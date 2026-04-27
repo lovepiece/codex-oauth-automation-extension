@@ -99,6 +99,81 @@ test('waitForCode returns sms dateTime from structured getStatus response', asyn
   assert.equal(result.callDateTime, '');
 });
 
+test('waitForCode waits for a newer sms dateTime after requesting a fresh code', async () => {
+  const activation = {
+    activationId: 102,
+    phoneNumber: '15550000001',
+    service: 'dr',
+    country: '187',
+    acquiredAt: 1000,
+    expiresAt: 60_000,
+    lastCode: '111111',
+    lastSmsDateTime: '2026-04-26 12:34:56',
+  };
+  const statuses = [
+    {
+      verificationType: 0,
+      sms: {
+        dateTime: '2026-04-26 12:34:56',
+        code: '222222',
+        text: 'Old HeroSMS payload with a changed-looking code 222222',
+      },
+      call: null,
+    },
+    {
+      verificationType: 0,
+      sms: {
+        dateTime: '2026-04-26 12:35:10',
+        code: '111111',
+        text: 'New HeroSMS payload can still contain repeated code 111111',
+      },
+      call: null,
+    },
+  ];
+  let now = 1000;
+  let getStatusCalls = 0;
+  const runtime = createHeroSmsRuntime({
+    initialState: {
+      heroSmsBaseUrl: 'https://hero-sms.com/stubs/handler_api.php',
+      heroSmsApiKey: 'sk-test',
+      heroSmsService: 'dr',
+      heroSmsCountry: '187',
+      currentHeroSmsActivation: activation,
+    },
+    now: () => now,
+    sleepImpl: async (ms) => {
+      now += ms;
+    },
+    fetchImpl: async (url) => {
+      const action = new URL(url).searchParams.get('action');
+      return {
+        ok: true,
+        text: async () => {
+          if (action === 'setStatus') return 'ACCESS_RETRY_GET';
+          if (action === 'getStatusV2') {
+            const status = statuses[Math.min(getStatusCalls, statuses.length - 1)];
+            getStatusCalls += 1;
+            return JSON.stringify(status);
+          }
+          throw new Error(`unexpected action: ${action}`);
+        },
+      };
+    },
+  });
+
+  const result = await runtime.waitForCode(activation, {
+    timeoutMs: 20_000,
+    pollIntervalMs: 5000,
+    requestFreshCodeOnStart: true,
+    markReady: false,
+    requireFreshCodeByDateTime: true,
+  });
+
+  assert.equal(result.code, '111111');
+  assert.equal(result.smsDateTime, '2026-04-26 12:35:10');
+  assert.equal(getStatusCalls, 2);
+});
+
 test('heroSmsGetNumber sends configured maxPrice to getNumberV2', async () => {
   let requestedUrl = '';
   const runtime = createHeroSmsRuntime({

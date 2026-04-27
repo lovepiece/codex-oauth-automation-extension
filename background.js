@@ -979,6 +979,14 @@ async function getHeroSmsCountrySelection(countryValue = '') {
   }
 }
 
+function normalizeHeroSmsDateTime(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized || normalized === '0000-00-00 00:00:00') {
+    return '';
+  }
+  return normalized;
+}
+
 function normalizeHeroSmsActivation(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -1001,6 +1009,8 @@ function normalizeHeroSmsActivation(value = null) {
     expiresAt,
     useCount: Math.max(0, Math.floor(Number(value.useCount) || 0)),
     lastCode: String(value.lastCode || '').trim(),
+    lastSmsDateTime: normalizeHeroSmsDateTime(value.lastSmsDateTime ?? value.smsDateTime ?? value.receiveSmsDate),
+    lastCallDateTime: normalizeHeroSmsDateTime(value.lastCallDateTime ?? value.callDateTime),
     lastStatus: String(value.lastStatus || '').trim(),
     lastStatusAt: Number(value.lastStatusAt) || 0,
     resendCount: Math.max(0, Math.floor(Number(value.resendCount) || 0)),
