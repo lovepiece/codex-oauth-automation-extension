@@ -36,7 +36,7 @@ test('step 1 clears login cookies before opening ChatGPT', async () => {
   const executor = api.createStep1Executor({
     addLog: async (message) => events.push(['log', message]),
     completeStepFromBackground: async (step) => events.push(['complete', step]),
-    openSignupEntryTab: async (step) => events.push(['open', step]),
+    openSignupEntryTab: async (step, options) => events.push(['open', step, options]),
     runPreStep6CookieCleanup: async (options) => events.push(['cleanup', options]),
   });
 
@@ -50,7 +50,7 @@ test('step 1 clears login cookies before opening ChatGPT', async () => {
   });
   assert.deepEqual(events.slice(1), [
     ['log', '步骤 1：正在打开 ChatGPT 官网...'],
-    ['open', 1],
+    ['open', 1, { reloadIfSameUrl: true }],
     ['complete', 1],
   ]);
 });

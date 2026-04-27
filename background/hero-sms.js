@@ -703,9 +703,23 @@
                   'phone_max_usage_exceeded_without_submit_continue',
                   failureText
                 );
+              } else if (reason === 'phone_sms_unavailable') {
+                await moveActivationToFailedList(latestActivation, reason, failureText);
+                await addLog?.(`步骤 9：已将无法接收短信的号码 ${latestActivation.phoneNumber}（ID ${latestActivation.activationId}）加入失败列表，后台将在 2 分钟后尝试通过 HeroSMS setStatus=8 取消激活。`, 'warn');
+                try {
+                  state = await getState();
+                  const nextActivation = await runtime.ensureActivationReadyForSubmission(state, {
+                    maxAttempts: HERO_SMS_PHONE_MAX_USAGE_RETRY_LIMIT,
+                  });
+                  await syncRuntimeToExtension();
+                  if (nextActivation?.phoneNumber) {
+                    await addLog?.(`步骤 9：已立即申请新的 HeroSMS 号码 ${nextActivation.phoneNumber}，准备返回 add-phone 页面后重新填写。`, 'warn');
+                  }
+                } catch (freshNumberError) {
+                  await addLog?.(`步骤 9：立即申请新 HeroSMS 号码失败，将在页面恢复后继续重试：${freshNumberError.message}`, 'warn');
+                }
               } else if (reason === 'phone_resend_rate_limited'
                 || reason === 'hero_sms_wait_code_timeout'
-                || reason === 'phone_sms_unavailable'
                 || reason === 'phone_verification_invalid_code'
                 || reason === 'phone_verification_failed') {
                 await cancelActivationForRefundAfterDelay(latestActivation, reason, failureText);

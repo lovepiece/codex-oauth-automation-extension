@@ -223,6 +223,12 @@ test('HeroSMS failed phone numbers wait before cancel and move 409 conflicts to 
   assert.match(source, /moveActivationToStandbyList\(activation, reason/);
 });
 
+test('HeroSMS sms unavailable numbers are failed immediately and cleaned later', () => {
+  assert.match(source, /reason === 'phone_sms_unavailable'[\s\S]*moveActivationToFailedList\(latestActivation, reason, failureText\)/);
+  assert.match(source, /后台将在 2 分钟后尝试通过 HeroSMS setStatus=8 取消激活/);
+  assert.match(source, /} else if \(reason === 'phone_resend_rate_limited'\s*\|\| reason === 'hero_sms_wait_code_timeout'\s*\|\| reason === 'phone_verification_invalid_code'\s*\|\| reason === 'phone_verification_failed'\) \{\s*await cancelActivationForRefundAfterDelay/);
+});
+
 test('handlePhonePageDuringStep8 requests a distinct sms after invalid code without resubmitting phone', async () => {
   const activation = {
     activationId: 401,

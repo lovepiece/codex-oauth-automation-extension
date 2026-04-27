@@ -23,10 +23,12 @@
       waitForTabUrlMatch,
     } = deps;
 
-    async function openSignupEntryTab(step = 1) {
+    async function openSignupEntryTab(step = 1, options = {}) {
+      const { reloadIfSameUrl = false } = options;
       const tabId = await reuseOrCreateTab('signup-page', SIGNUP_ENTRY_URL, {
         inject: SIGNUP_PAGE_INJECT_FILES,
         injectSource: 'signup-page',
+        reloadIfSameUrl,
       });
 
       await ensureContentScriptReadyOnTab('signup-page', tabId, {

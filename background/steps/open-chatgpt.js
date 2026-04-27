@@ -18,7 +18,7 @@
         });
       }
       await addLog('步骤 1：正在打开 ChatGPT 官网...');
-      await openSignupEntryTab(1);
+      await openSignupEntryTab(1, { reloadIfSameUrl: true });
       await completeStepFromBackground(1, {});
     }
 

@@ -6395,8 +6395,9 @@ async function completeStepFromBackground(step, payload = {}) {
   }
 
   const completionState = step === LAST_STEP_ID ? await getState() : null;
-  await setStepStatus(step, 'completed');
-  await addLog(`步骤 ${step} 已完成`, 'ok');
+  const skipped = Boolean(payload?.skipped);
+  await setStepStatus(step, skipped ? 'skipped' : 'completed');
+  await addLog(`步骤 ${step} 已${skipped ? '跳过' : '完成'}`, skipped ? 'warn' : 'ok');
   await handleStepData(step, payload);
   if (step === LAST_STEP_ID) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
@@ -7635,8 +7636,12 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
 });
 const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
   addLog,
+  chrome,
+  completeStepFromBackground,
   generateRandomBirthday,
   generateRandomName,
+  getTabId,
+  isSignupEntryHost,
   sendToContentScript,
 });
 const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
